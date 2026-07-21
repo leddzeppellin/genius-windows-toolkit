@@ -1,0 +1,36 @@
+{
+  "Version": 1,
+  "Tool": "GeniusWindowsToolkit",
+  "SavedAt": "2026-07-21T00:00:00.0000000-03:00",
+  "TargetDrive": "D:",
+  "Folders": [
+    "Desktop",
+    "Documents",
+    "Downloads",
+    "Pictures",
+    "Music",
+    "Videos"
+  ],
+  "Network": [
+    "NetBios",
+    "SmbGuest",
+    "Private",
+    "NoPassword",
+    "Firewall",
+    "Services",
+    "ResetStack"
+  ],
+  "Tweaks": [
+    "ShowExtensions",
+    "Clipboard",
+    "ThisPc"
+  ],
+  "Packages": [
+    "Google.Chrome",
+    "7zip.7zip",
+    "VideoLAN.VLC",
+    "AnyDeskSoftwareGmbH.AnyDesk",
+    "Notepad++.Notepad++",
+    "EclipseAdoptium.Temurin.11.JRE#x64"
+  ]
+}
