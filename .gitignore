@@ -1,0 +1,9 @@
+# Artefatos de teste local
+tools/render-test.png
+*.log
+
+# Lixo do Windows / editores
+Thumbs.db
+Desktop.ini
+*.swp
+.vscode/
