@@ -5,20 +5,22 @@ Utilitário PowerShell de bancada para **pós-formatação do Windows**, com int
 ## Execução rápida (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/GeniusToolkit.ps1 | iex
+irm https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/get.ps1 | iex
 ```
 
 Com parâmetros:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/GeniusToolkit.ps1))) -TargetDrive D: -Preset Extended
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/get.ps1))) -TargetDrive D: -Preset Extended
 ```
 
 Aplicando um preset salvo (arquivo local ou URL):
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/GeniusToolkit.ps1))) -Config 'C:\presets\bancada.json'
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/get.ps1))) -Config 'C:\presets\bancada.json'
 ```
+
+> ℹ️ O `get.ps1` é um carregador minúsculo em ASCII puro: ele baixa o `GeniusToolkit.ps1` (UTF-8 com BOM, acentuação e ícones corretos), remove o caractere BOM que o `irm` preserva — e que quebraria o `iex` — e executa repassando seus argumentos. Para uso local, rode o `GeniusToolkit.ps1` diretamente.
 
 ## 📁 Migração de pastas do usuário
 

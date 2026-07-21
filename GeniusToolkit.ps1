@@ -16,11 +16,11 @@
   Todas as operações pesadas rodam em runspaces (a janela nunca congela) e o
   progresso real é exibido em tempo integral.
 
-  Execução direta pelo GitHub:
-    irm https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/GeniusToolkit.ps1 | iex
+  Execução direta pelo GitHub (via carregador get.ps1, seguro contra o BOM):
+    irm https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/get.ps1 | iex
 
   Com parâmetros:
-    & ([scriptblock]::Create((irm URL_RAW))) -TargetDrive D: -Preset Extended -Config preset.json
+    & ([scriptblock]::Create((irm URL_DO_GET))) -TargetDrive D: -Preset Extended -Config preset.json
 
 .NOTES
   Autor: Ricardo Valério da Silva (leddzeppellin) + Claude
@@ -59,7 +59,7 @@ $sync.LogRoot      = Join-Path $sync.AppRoot 'logs'
 $sync.ReportRoot   = Join-Path $sync.AppRoot 'reports'
 $sync.SessionStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $sync.LogFile      = Join-Path $sync.LogRoot ("session-{0}.log" -f $sync.SessionStamp)
-$sync.ScriptUrl    = if ($ScriptUrl) { $ScriptUrl } else { 'https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/GeniusToolkit.ps1' }
+$sync.ScriptUrl    = if ($ScriptUrl) { $ScriptUrl } else { 'https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/get.ps1' }
 
 $sync.LogQueue      = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
 $sync.PendingUi     = [System.Collections.Concurrent.ConcurrentQueue[object]]::new()

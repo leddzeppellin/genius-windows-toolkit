@@ -1,4 +1,4 @@
-# Abre a janela real por alguns segundos, tira uma captura e fecha sozinha.
+﻿# Abre a janela real por alguns segundos, tira uma captura e fecha sozinha.
 # Uso: powershell -File tools/test-render.ps1 [-Seconds 5] [-Shot caminho.png]
 param(
     [int]$Seconds = 5,
