@@ -10,7 +10,34 @@ if (-not (Test-Path $logo)) {
     exit 1
 }
 
-$b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($logo))
+# Redimensiona a cópia embutida para no máx. 520px de largura (mantém o arquivo
+# original em alta). Isso mantém o script leve para o "irm | iex".
+Add-Type -AssemblyName System.Drawing
+$src = [System.Drawing.Image]::FromFile($logo)
+try {
+    $maxW = 520
+    if ($src.Width -gt $maxW) {
+        $ratio = $maxW / $src.Width
+        $w = $maxW
+        $h = [int][math]::Round($src.Height * $ratio)
+        $bmp = New-Object System.Drawing.Bitmap $w, $h
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+        $g.DrawImage($src, 0, 0, $w, $h)
+        $g.Dispose()
+        $ms = New-Object System.IO.MemoryStream
+        $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+        $bytes = $ms.ToArray()
+        $ms.Dispose(); $bmp.Dispose()
+    }
+    else {
+        $bytes = [IO.File]::ReadAllBytes($logo)
+    }
+}
+finally { $src.Dispose() }
+
+$b64 = [Convert]::ToBase64String($bytes)
 $text = [IO.File]::ReadAllText($target, [Text.Encoding]::UTF8)
 
 # Substitui a primeira atribuição de $LogoBase64 (pode estar vazia ou já preenchida).
