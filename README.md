@@ -80,6 +80,17 @@ Botões de atalho **Só essenciais** e **Limpar**. Tudo com backup `.reg` antes.
 - **Plano de energia**: ativar/remover o Desempenho Máximo.
 - **Painéis clássicos**: atalhos para Painel de Controle, Gerenciador de Dispositivos, Serviços, Gerenciamento de Disco e outros.
 
+## 🪟 Criar ISO (Windows 11 enxuto)
+
+Gera uma ISO personalizada do Windows 11 a partir de uma imagem oficial, em quatro passos guiados:
+
+1. **Selecionar** a ISO oficial (`.iso`).
+2. **Montar e verificar** — lista as edições disponíveis (Home, Pro, etc.).
+3. **Modificar** — copia a imagem, remove apps pré-instalados (Teams, Copilot, Office Hub, Xbox, Solitaire, Clipchamp, Dev Home e outros), desativa telemetria e sugestões, permite conta local no OOBE e aplica **bypass dos requisitos** (TPM 2.0 / Secure Boot / CPU / RAM) para instalar em máquinas mais antigas. Opcionalmente injeta os **drivers da máquina atual** na imagem.
+4. **Gerar a ISO final** com `oscdimg` (instalado via winget se necessário), mantendo só a edição escolhida.
+
+> 🛡️ **Diferença importante**: ao contrário de outras ferramentas, a ISO gerada mantém o **Windows Update funcional** — não desativamos os serviços de atualização (evita entregar um sistema que nunca mais se atualiza). Requer Administrador, leva de 15 a 40 minutos e usa ~10 GB de disco temporário.
+
 ## 🩺 Diagnóstico
 
 Relatório com Windows, hardware, volumes, pastas conhecidas do perfil, adaptadores e perfis de rede — salvo em `%LOCALAPPDATA%\GeniusWindowsToolkit\reports`.

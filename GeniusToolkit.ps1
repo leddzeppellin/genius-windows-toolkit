@@ -80,6 +80,15 @@ $sync.Controls       = @{}
 $sync.Window         = $null
 $sync.OpData         = @{}   # dados de registro/serviço/ação por chave (acessível nos runspaces)
 
+# Estado da aba Criar ISO (MicroWin)
+$sync.IsoPath        = $null
+$sync.IsoMountLetter = $null
+$sync.IsoWimPath     = $null
+$sync.IsoEditions    = @()
+$sync.IsoWorkDir     = $null
+$sync.IsoContentsDir = $null
+$sync.IsoReady       = $false   # install.wim já modificado, pronto para exportar
+
 New-Item -ItemType Directory -Path $sync.BackupRoot, $sync.LogRoot, $sync.ReportRoot -Force | Out-Null
 
 #endregion
@@ -1515,11 +1524,392 @@ function Invoke-GwtPerfWorker {
     }
 }
 
+# ============================================================================
+# Criar ISO (MicroWin) — monta uma ISO do Windows, enxuga o install.wim e recria.
+# ============================================================================
+
+function Set-GwtOfflineReg {
+    param([string]$Path, [string]$Name, [string]$Type, [string]$Value)
+    & reg.exe add $Path /v $Name /t $Type /d $Value /f 2>&1 | Out-Null
+}
+
+function Invoke-GwtIsoMountWorker {
+    param([string]$IsoPath)
+
+    try {
+        $sync.Busy = $true
+        $sync.StatusText = 'Montando a ISO...'
+        Add-GwtLog "================ CRIAR ISO: montar e verificar ================"
+        Add-GwtLog "ISO: $IsoPath"
+
+        Mount-DiskImage -ImagePath $IsoPath -ErrorAction Stop | Out-Null
+        $letter = $null
+        for ($i = 0; $i -lt 20; $i++) {
+            Start-Sleep -Milliseconds 500
+            $letter = (Get-DiskImage -ImagePath $IsoPath | Get-Volume).DriveLetter
+            if ($letter) { break }
+        }
+        if (-not $letter) { throw 'Não foi possível obter a letra da unidade montada.' }
+        $drive = "${letter}:"
+        Add-GwtLog "Montada em $drive" 'Success'
+
+        $wim = Join-Path $drive 'sources\install.wim'
+        $esd = Join-Path $drive 'sources\install.esd'
+        $active = if (Test-Path $wim) { $wim } elseif (Test-Path $esd) { $esd } else { $null }
+        if (-not $active) {
+            Dismount-DiskImage -ImagePath $IsoPath | Out-Null
+            throw 'install.wim/install.esd não encontrado — não é uma ISO do Windows válida.'
+        }
+
+        $sync.StatusText = 'Lendo edições da imagem...'
+        $editions = @(Get-WindowsImage -ImagePath $active | Select-Object ImageIndex, ImageName)
+        Add-GwtLog "Edições encontradas: $($editions.Count)" 'Success'
+        foreach ($e in $editions) { Add-GwtLog ("  [{0}] {1}" -f $e.ImageIndex, $e.ImageName) }
+
+        $sync.IsoPath = $IsoPath
+        $sync.IsoMountLetter = $drive
+        $sync.IsoWimPath = $active
+        $sync.IsoEditions = @($editions | ForEach-Object { "$($_.ImageIndex): $($_.ImageName)" })
+
+        Request-GwtUi @{ Action = 'IsoEditions' }
+    }
+    catch {
+        Add-GwtLog "Falha ao montar/verificar: $($_.Exception.Message)" 'Error'
+        Request-GwtUi @{ Action = 'Message'; Title = 'Erro na ISO'; Text = $_.Exception.Message; Kind = 'Error' }
+    }
+    finally {
+        $sync.Busy = $false
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
+function Invoke-GwtIsoApplyDebloat {
+    param([string]$MountDir, [string]$IsoContents, [string]$EditionId)
+
+    # 1. Remover AppX provisionados (bloatware)
+    Add-GwtLog 'Removendo pacotes AppX provisionados...'
+    $prefixes = @(
+        'Clipchamp.Clipchamp', 'Microsoft.BingNews', 'Microsoft.BingSearch', 'Microsoft.BingWeather',
+        'Microsoft.GetHelp', 'Microsoft.MicrosoftOfficeHub', 'Microsoft.MicrosoftSolitaireCollection',
+        'Microsoft.MicrosoftStickyNotes', 'Microsoft.OutlookForWindows', 'Microsoft.PowerAutomateDesktop',
+        'Microsoft.StartExperiencesApp', 'Microsoft.Todos', 'Microsoft.Windows.DevHome',
+        'Microsoft.WindowsFeedbackHub', 'Microsoft.WindowsSoundRecorder', 'Microsoft.ZuneMusic',
+        'MicrosoftCorporationII.QuickAssist', 'MSTeams'
+    )
+    $provisioned = & dism /English "/image:$MountDir" /Get-ProvisionedAppxPackages |
+        ForEach-Object { if ($_ -match 'PackageName : (.*)') { $Matches[1] } }
+    foreach ($pkg in $provisioned) {
+        if ($prefixes | Where-Object { $pkg -like "*$_*" }) {
+            & dism /English "/image:$MountDir" /Remove-ProvisionedAppxPackage "/PackageName:$pkg" 2>&1 | Out-Null
+            Add-GwtLog "  removido: $pkg"
+        }
+    }
+
+    # 2. Tweaks offline via hives montadas
+    Add-GwtLog 'Carregando hives offline do registro...'
+    & reg.exe load 'HKLM\zDEFAULT' "$MountDir\Windows\System32\config\default" 2>&1 | Out-Null
+    & reg.exe load 'HKLM\zNTUSER'  "$MountDir\Users\Default\ntuser.dat" 2>&1 | Out-Null
+    & reg.exe load 'HKLM\zSOFTWARE' "$MountDir\Windows\System32\config\SOFTWARE" 2>&1 | Out-Null
+    & reg.exe load 'HKLM\zSYSTEM'  "$MountDir\Windows\System32\config\SYSTEM" 2>&1 | Out-Null
+
+    Add-GwtLog 'Aplicando bypass de requisitos (TPM/SecureBoot/CPU/RAM)...'
+    $labconfig = 'HKLM\zSYSTEM\Setup\LabConfig'
+    foreach ($n in 'BypassCPUCheck', 'BypassRAMCheck', 'BypassSecureBootCheck', 'BypassStorageCheck', 'BypassTPMCheck') {
+        Set-GwtOfflineReg -Path $labconfig -Name $n -Type 'REG_DWORD' -Value '1'
+    }
+    Set-GwtOfflineReg -Path 'HKLM\zSYSTEM\Setup\MoSetup' -Name 'AllowUpgradesWithUnsupportedTPMOrCPU' -Type 'REG_DWORD' -Value '1'
+    Set-GwtOfflineReg -Path 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' -Name 'SV1' -Type 'REG_DWORD' -Value '0'
+    Set-GwtOfflineReg -Path 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' -Name 'SV2' -Type 'REG_DWORD' -Value '0'
+    Set-GwtOfflineReg -Path 'HKLM\zNTUSER\Control Panel\UnsupportedHardwareNotificationCache' -Name 'SV1' -Type 'REG_DWORD' -Value '0'
+    Set-GwtOfflineReg -Path 'HKLM\zNTUSER\Control Panel\UnsupportedHardwareNotificationCache' -Name 'SV2' -Type 'REG_DWORD' -Value '0'
+
+    Add-GwtLog 'Desativando apps patrocinados e sugestões...'
+    $cdm = 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'
+    foreach ($n in 'OemPreInstalledAppsEnabled', 'PreInstalledAppsEnabled', 'SilentInstalledAppsEnabled',
+                   'ContentDeliveryAllowed', 'FeatureManagementEnabled', 'PreInstalledAppsEverEnabled',
+                   'SoftLandingEnabled', 'SubscribedContentEnabled', 'SystemPaneSuggestionsEnabled') {
+        Set-GwtOfflineReg -Path $cdm -Name $n -Type 'REG_DWORD' -Value '0'
+    }
+    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' -Name 'DisableWindowsConsumerFeatures' -Type 'REG_DWORD' -Value '1'
+    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' -Name 'DisableConsumerAccountStateContent' -Type 'REG_DWORD' -Value '1'
+    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' -Name 'DisableCloudOptimizedContent' -Type 'REG_DWORD' -Value '1'
+
+    Add-GwtLog 'Permitindo conta local no OOBE...'
+    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' -Name 'BypassNRO' -Type 'REG_DWORD' -Value '1'
+
+    Add-GwtLog 'Desativando telemetria...'
+    Set-GwtOfflineReg -Path 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo' -Name 'Enabled' -Type 'REG_DWORD' -Value '0'
+    Set-GwtOfflineReg -Path 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\Privacy' -Name 'TailoredExperiencesWithDiagnosticDataEnabled' -Type 'REG_DWORD' -Value '0'
+    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\DataCollection' -Name 'AllowTelemetry' -Type 'REG_DWORD' -Value '0'
+    Set-GwtOfflineReg -Path 'HKLM\zSYSTEM\ControlSet001\Services\dmwappushservice' -Name 'Start' -Type 'REG_DWORD' -Value '4'
+
+    Add-GwtLog 'Desativando Copilot, Chat e backup do OneDrive...'
+    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsCopilot' -Name 'TurnOffWindowsCopilot' -Type 'REG_DWORD' -Value '1'
+    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Chat' -Name 'ChatIcon' -Type 'REG_DWORD' -Value '3'
+    Set-GwtOfflineReg -Path 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'TaskbarMn' -Type 'REG_DWORD' -Value '0'
+    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\OneDrive' -Name 'DisableFileSyncNGSC' -Type 'REG_DWORD' -Value '1'
+
+    Add-GwtLog 'Desativando Armazenamento Reservado e criptografia automática...'
+    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager' -Name 'ShippedWithReserves' -Type 'REG_DWORD' -Value '0'
+    Set-GwtOfflineReg -Path 'HKLM\zSYSTEM\ControlSet001\Control\BitLocker' -Name 'PreventDeviceEncryption' -Type 'REG_DWORD' -Value '1'
+
+    Add-GwtLog 'Impedindo instalação de Teams e novo Outlook...'
+    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Teams' -Name 'DisableInstallation' -Type 'REG_DWORD' -Value '1'
+    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Orchestrator\UScheduler\OutlookUpdate' -Name 'workCompleted' -Type 'REG_DWORD' -Value '1'
+    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Orchestrator\UScheduler\DevHomeUpdate' -Name 'workCompleted' -Type 'REG_DWORD' -Value '1'
+
+    # NOTA DE SEGURANÇA: NÃO desativamos os serviços do Windows Update aqui.
+    # Fazer isso deixaria a instalação sem atualizações; preferimos o WU funcional.
+
+    Add-GwtLog 'Descarregando hives offline...'
+    [gc]::Collect()
+    foreach ($h in 'zDEFAULT', 'zNTUSER', 'zSOFTWARE', 'zSYSTEM') {
+        & reg.exe unload "HKLM\$h" 2>&1 | Out-Null
+    }
+
+    # 3. Apagar tarefas de telemetria/CEIP (não mexemos nas de Windows Update)
+    Add-GwtLog 'Removendo tarefas agendadas de telemetria...'
+    $tasks = "$MountDir\Windows\System32\Tasks\Microsoft\Windows"
+    foreach ($t in @(
+        'Application Experience\Microsoft Compatibility Appraiser',
+        'Application Experience\ProgramDataUpdater',
+        'Customer Experience Improvement Program',
+        'Windows Error Reporting\QueueReporting'
+    )) {
+        $full = Join-Path $tasks $t
+        if (Test-Path $full) { Remove-Item $full -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    # 4. ei.cfg para a edição escolhida (evita chave de produto embutida errada)
+    if ($IsoContents -and $EditionId) {
+        $sources = Join-Path $IsoContents 'sources'
+        $eiCfg = "[EditionID]`r`n$EditionId`r`n[Channel]`r`nRetail`r`n[VL]`r`n0"
+        Set-Content -Path (Join-Path $sources 'ei.cfg') -Value $eiCfg -Encoding ASCII -Force
+        $pidFile = Join-Path $sources 'PID.txt'
+        if (Test-Path $pidFile) { Remove-Item $pidFile -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Invoke-GwtIsoModifyWorker {
+    param([int]$Index, [string]$EditionName, [bool]$InjectDrivers)
+
+    $mountDir = $null
+    try {
+        $sync.Busy = $true
+        $sync.ProgressMax = [double]100
+        $sync.ProgressValue = [double]0
+        Add-GwtLog "================ CRIAR ISO: modificar install.wim ================"
+        Add-GwtLog "Edição: $EditionName (índice $Index)"
+
+        $workDir = Join-Path $env:TEMP ("GeniusISO_{0}" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+        $isoContents = Join-Path $workDir 'iso_contents'
+        $mountDir = Join-Path $workDir 'wim_mount'
+        New-Item -ItemType Directory -Path $isoContents, $mountDir -Force | Out-Null
+
+        $sync.StatusText = 'Copiando conteúdo da ISO...'
+        $sync.ProgressValue = [double]8
+        Add-GwtLog "Copiando ISO ($($sync.IsoMountLetter)) para a pasta de trabalho..."
+        & robocopy.exe $sync.IsoMountLetter $isoContents /E /NFL /NDL /NJH /NJS /NP | Out-Null
+
+        $leaf = Split-Path $sync.IsoWimPath -Leaf
+        $localWim = Join-Path $isoContents "sources\$leaf"
+        if (-not (Test-Path $localWim)) { throw "Imagem copiada não encontrada: sources\$leaf" }
+        Set-ItemProperty -Path $localWim -Name IsReadOnly -Value $false
+
+        # install.esd precisa virar install.wim exportando a edição escolhida
+        if ($leaf -ieq 'install.esd') {
+            $sync.StatusText = 'Convertendo install.esd para install.wim...'
+            Add-GwtLog 'Convertendo install.esd para install.wim (edição escolhida)...'
+            $newWim = Join-Path $isoContents 'sources\install.wim'
+            Export-WindowsImage -SourceImagePath $localWim -SourceIndex $Index -DestinationImagePath $newWim -CompressionType Max | Out-Null
+            Remove-Item $localWim -Force
+            $localWim = $newWim
+            $Index = 1
+        }
+
+        $sync.StatusText = 'Montando install.wim...'
+        $sync.ProgressValue = [double]25
+        Add-GwtLog "Montando install.wim (índice $Index)..."
+        Mount-WindowsImage -ImagePath $localWim -Index $Index -Path $mountDir | Out-Null
+
+        # EditionID a partir da imagem montada
+        $editionId = ''
+        $cur = & dism /English "/Image:$mountDir" /Get-CurrentEdition 2>&1
+        foreach ($line in $cur) { if ($line -match 'Current Edition\s*:\s*(.+?)\s*$') { $editionId = $Matches[1].Trim(); break } }
+
+        $sync.StatusText = 'Aplicando modificações...'
+        $sync.ProgressValue = [double]45
+        Invoke-GwtIsoApplyDebloat -MountDir $mountDir -IsoContents $isoContents -EditionId $editionId
+
+        if ($InjectDrivers) {
+            $sync.StatusText = 'Injetando drivers do sistema atual...'
+            Add-GwtLog 'Exportando e injetando drivers do sistema atual...'
+            $drv = Join-Path $workDir 'drivers'
+            New-Item -ItemType Directory -Path $drv -Force | Out-Null
+            Export-WindowsDriver -Online -Destination $drv | Out-Null
+            & dism /English "/image:$mountDir" /Add-Driver "/Driver:$drv" /Recurse 2>&1 | Out-Null
+            Add-GwtLog 'Drivers injetados no install.wim.' 'Success'
+        }
+
+        $sync.StatusText = 'Limpando component store (WinSxS)...'
+        $sync.ProgressValue = [double]58
+        Add-GwtLog 'Limpando component store (/ResetBase)...'
+        & dism /English "/image:$mountDir" /Cleanup-Image /StartComponentCleanup /ResetBase 2>&1 | Out-Null
+
+        $sync.StatusText = 'Salvando install.wim (pode demorar)...'
+        $sync.ProgressValue = [double]66
+        Add-GwtLog 'Desmontando e salvando install.wim...'
+        Dismount-WindowsImage -Path $mountDir -Save | Out-Null
+
+        $sync.StatusText = 'Removendo edições não usadas...'
+        $sync.ProgressValue = [double]78
+        Add-GwtLog "Exportando somente a edição '$EditionName'..."
+        $exportWim = Join-Path $isoContents 'sources\install_export.wim'
+        Export-WindowsImage -SourceImagePath $localWim -SourceIndex $Index -DestinationImagePath $exportWim | Out-Null
+        Remove-Item $localWim -Force
+        Rename-Item $exportWim -NewName 'install.wim' -Force
+
+        $sync.StatusText = 'Desmontando ISO de origem...'
+        Add-GwtLog 'Desmontando a ISO de origem...'
+        Dismount-DiskImage -ImagePath $sync.IsoPath -ErrorAction SilentlyContinue | Out-Null
+
+        $sync.IsoWorkDir = $workDir
+        $sync.IsoContentsDir = $isoContents
+        $sync.IsoReady = $true
+        $sync.ProgressValue = [double]100
+        Add-GwtLog 'install.wim modificado com sucesso. Agora exporte a ISO final.' 'Success'
+        Request-GwtUi @{ Action = 'IsoModified' }
+    }
+    catch {
+        Add-GwtLog "Falha ao modificar: $($_.Exception.Message)" 'Error'
+        # Limpeza defensiva
+        try {
+            if ($mountDir -and (Get-WindowsImage -Mounted | Where-Object { $_.Path -eq $mountDir })) {
+                Dismount-WindowsImage -Path $mountDir -Discard | Out-Null
+            }
+        } catch { }
+        try { Dismount-DiskImage -ImagePath $sync.IsoPath -ErrorAction SilentlyContinue | Out-Null } catch { }
+        Request-GwtUi @{ Action = 'Message'; Title = 'Erro ao modificar'; Text = $_.Exception.Message; Kind = 'Error' }
+    }
+    finally {
+        $sync.Busy = $false
+        $sync.ProgressMax = [double]0
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
+function Find-GwtOscdimg {
+    $found = Get-ChildItem 'C:\Program Files (x86)\Windows Kits' -Recurse -Filter 'oscdimg.exe' -ErrorAction SilentlyContinue |
+             Select-Object -First 1 -ExpandProperty FullName
+    if (-not $found) {
+        $found = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages" -Recurse -Filter 'oscdimg.exe' -ErrorAction SilentlyContinue |
+                 Where-Object { $_.FullName -match 'Microsoft\.OSCDIMG' } |
+                 Select-Object -First 1 -ExpandProperty FullName
+    }
+    return $found
+}
+
+function Invoke-GwtIsoExportWorker {
+    param([string]$OutputPath)
+
+    try {
+        $sync.Busy = $true
+        $sync.StatusText = 'Preparando exportação da ISO...'
+        Add-GwtLog "================ CRIAR ISO: exportar ================"
+
+        $oscdimg = Find-GwtOscdimg
+        if (-not $oscdimg) {
+            Add-GwtLog 'oscdimg.exe não encontrado. Instalando via winget (Microsoft.OSCDIMG)...' 'Warn'
+            if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
+                & winget.exe install -e --id Microsoft.OSCDIMG --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+                $oscdimg = Find-GwtOscdimg
+            }
+        }
+        if (-not $oscdimg) {
+            throw 'oscdimg.exe não disponível. Instale com "winget install -e --id Microsoft.OSCDIMG" ou o Windows ADK.'
+        }
+        Add-GwtLog "oscdimg: $oscdimg" 'Success'
+
+        $contents = $sync.IsoContentsDir
+        $bootData = "2#p0,e,b`"$contents\boot\etfsboot.com`"#pEF,e,b`"$contents\efi\microsoft\boot\efisys.bin`""
+        $oscArgs = @('-m', '-o', '-u2', '-udfver102', "-bootdata:$bootData", "$contents", "$OutputPath")
+
+        $sync.StatusText = 'Gerando a ISO (oscdimg)...'
+        Add-GwtLog 'Executando oscdimg...'
+        $psi = [System.Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = $oscdimg
+        $psi.Arguments = ($oscArgs | ForEach-Object { if ($_ -match '\s') { "`"$_`"" } else { $_ } }) -join ' '
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $proc = [System.Diagnostics.Process]::new()
+        $proc.StartInfo = $psi
+        [void]$proc.Start()
+        while (-not $proc.StandardOutput.EndOfStream) {
+            $l = $proc.StandardOutput.ReadLine()
+            if ($l -and $l.Trim()) { Add-GwtLog $l.Trim() }
+        }
+        $proc.WaitForExit()
+
+        if ($proc.ExitCode -eq 0) {
+            Add-GwtLog "ISO gerada com sucesso: $OutputPath" 'Success'
+            Request-GwtUi @{ Action = 'Message'; Title = 'ISO criada'; Kind = 'Info'
+                             Text = "ISO gerada com sucesso!`n`n$OutputPath`n`nUse o Rufus ou o Criador de Mídia para gravar em pendrive." }
+        }
+        else {
+            throw "oscdimg retornou código $($proc.ExitCode)."
+        }
+    }
+    catch {
+        Add-GwtLog "Falha ao exportar: $($_.Exception.Message)" 'Error'
+        Request-GwtUi @{ Action = 'Message'; Title = 'Erro ao exportar'; Text = $_.Exception.Message; Kind = 'Error' }
+    }
+    finally {
+        $sync.Busy = $false
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
+function Invoke-GwtIsoCleanWorker {
+    try {
+        $sync.Busy = $true
+        $sync.StatusText = 'Limpando trabalho da ISO...'
+        Add-GwtLog 'Limpando pasta de trabalho da ISO...'
+
+        if ($sync.IsoWorkDir -and (Test-Path $sync.IsoWorkDir)) {
+            $mountDir = Join-Path $sync.IsoWorkDir 'wim_mount'
+            try {
+                $mounted = Get-WindowsImage -Mounted | Where-Object { $_.Path -like "$($sync.IsoWorkDir)*" }
+                foreach ($m in $mounted) { Dismount-WindowsImage -Path $m.Path -Discard | Out-Null }
+            } catch { & dism /English /Cleanup-Wim 2>&1 | Out-Null }
+            Remove-Item $sync.IsoWorkDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        if ($sync.IsoPath) { try { Dismount-DiskImage -ImagePath $sync.IsoPath -ErrorAction SilentlyContinue | Out-Null } catch { } }
+
+        $sync.IsoWorkDir = $null; $sync.IsoContentsDir = $null; $sync.IsoReady = $false
+        $sync.IsoPath = $null; $sync.IsoMountLetter = $null; $sync.IsoWimPath = $null; $sync.IsoEditions = @()
+        Add-GwtLog 'Limpeza concluída. Pronto para uma nova ISO.' 'Success'
+        Request-GwtUi @{ Action = 'IsoReset' }
+    }
+    catch { Add-GwtLog "Falha na limpeza: $($_.Exception.Message)" 'Error' }
+    finally {
+        $sync.Busy = $false
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
 function Invoke-GwtDiagnosticWorker {
     try {
         $sync.Busy = $true
         $sync.StatusText = 'Gerando diagnóstico...'
         Add-GwtLog 'Gerando diagnóstico da máquina...'
+
+        $computer = Get-CimInstance Win32_ComputerSystem
+        $os = Get-CimInstance Win32_OperatingSystem
+        $bios = Get-CimInstance Win32_BIOS
+        $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+        $volumes = @(Get-Volume | Where-Object DriveLetter | Sort-Object DriveLetter)
 
         $computer = Get-CimInstance Win32_ComputerSystem
         $os = Get-CimInstance Win32_OperatingSystem
@@ -2220,6 +2610,77 @@ function Invoke-GwtRunspace {
                         </Grid>
                     </TabItem>
 
+                    <TabItem Header="🪟  Criar ISO">
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="14"/>
+                                <ColumnDefinition Width="380"/>
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0" Style="{StaticResource Card}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel>
+                                        <TextBlock Text="Criar uma ISO enxuta do Windows 11" FontSize="18" FontWeight="Bold"/>
+                                        <TextBlock Text="Monta uma ISO oficial, remove bloatware e telemetria, aplica bypass de requisitos (TPM/Secure Boot/CPU/RAM) e recria a imagem. Requer Administrador." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,14"/>
+
+                                        <Border Background="{StaticResource SoftBrush}" CornerRadius="10" Padding="14" Margin="0,0,0,10">
+                                            <StackPanel>
+                                                <TextBlock Text="1 · Selecionar ISO" FontWeight="Bold" Margin="0,0,0,8"/>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBox Name="IsoPathBox" IsReadOnly="True" VerticalContentAlignment="Center" Text="Nenhuma ISO selecionada..." Margin="0,0,8,0"/>
+                                                    <Button Grid.Column="1" Name="IsoBrowseButton" Content="Procurar..." Margin="0"/>
+                                                </Grid>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Background="{StaticResource SoftBrush}" CornerRadius="10" Padding="14" Margin="0,0,0,10">
+                                            <StackPanel>
+                                                <TextBlock Text="2 · Montar e verificar" FontWeight="Bold" Margin="0,0,0,8"/>
+                                                <Button Name="IsoMountButton" Content="🔎  Montar e listar edições" HorizontalAlignment="Left"/>
+                                                <TextBlock Text="Edição a manter na ISO final:" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,4"/>
+                                                <ComboBox Name="IsoEditionCombo" Height="36" IsEnabled="False"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Background="{StaticResource SoftBrush}" CornerRadius="10" Padding="14" Margin="0,0,0,10">
+                                            <StackPanel>
+                                                <TextBlock Text="3 · Modificar a imagem" FontWeight="Bold" Margin="0,0,0,8"/>
+                                                <CheckBox Name="IsoInjectDriversCheck" Content="Injetar os drivers desta máquina na ISO" Margin="0,0,0,8"
+                                                          ToolTip="Exporta os drivers do sistema atual e injeta no install.wim (útil para o mesmo modelo de máquina)."/>
+                                                <Button Name="IsoModifyButton" Style="{StaticResource GoldButton}" Content="🛠️  Modificar install.wim" HorizontalAlignment="Left" IsEnabled="False"/>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <Border Background="{StaticResource SoftBrush}" CornerRadius="10" Padding="14">
+                                            <StackPanel>
+                                                <TextBlock Text="4 · Gerar a ISO final" FontWeight="Bold" Margin="0,0,0,8"/>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Button Name="IsoExportButton" Style="{StaticResource GoldButton}" Content="💿  Salvar ISO..." IsEnabled="False"/>
+                                                    <Button Name="IsoCleanButton" Style="{StaticResource GhostButton}" Content="🧽  Limpar e recomeçar" Margin="0"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Border>
+
+                            <Border Grid.Column="2" Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <TextBlock Text="Como funciona" FontSize="18" FontWeight="Bold" Margin="0,0,0,10"/>
+                                    <TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" LineHeight="21"><Run Text="• Use uma ISO oficial do Windows 11 (baixe pelo site da Microsoft)."/><LineBreak/><Run Text="• A imagem final remove apps pré-instalados (Teams, Copilot, Office Hub, Xbox, etc.), telemetria e sugestões, e permite conta local no OOBE."/><LineBreak/><Run Text="• O bypass de requisitos permite instalar em máquinas sem TPM 2.0/Secure Boot."/><LineBreak/><Run Text="• O processo leva vários minutos e usa bastante espaço em disco temporário (~10 GB) e o oscdimg (instalado via winget se faltar)."/></TextBlock>
+                                    <Border Background="#2D2113" BorderBrush="{StaticResource GoldBrush}" BorderThickness="1" CornerRadius="10" Padding="14" Margin="0,16,0,0">
+                                        <TextBlock Foreground="#FFE7B0" TextWrapping="Wrap" LineHeight="20"><Run Text="Diferente de outras ferramentas, o Windows Update continua funcional na ISO gerada — não desativamos os serviços de atualização. O acompanhamento aparece no log abaixo."/></TextBlock>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </TabItem>
+
                     <TabItem Header="🩺  Diagnóstico">
                         <Grid Margin="0,4,0,0">
                             <Grid.RowDefinitions>
@@ -2878,6 +3339,73 @@ $sync.Controls['DiagRunButton'].Add_Click({
     Invoke-GwtRunspace -ScriptBlock { Invoke-GwtDiagnosticWorker }
 })
 
+# ---- Criar ISO (MicroWin) ----
+$sync.Controls['IsoBrowseButton'].Add_Click({
+    $dialog = New-Object Microsoft.Win32.OpenFileDialog
+    $dialog.Title = 'Selecione a ISO do Windows 11'
+    $dialog.Filter = 'Imagens ISO (*.iso)|*.iso|Todos (*.*)|*.*'
+    if ($dialog.ShowDialog($Window) -ne $true) { return }
+    $sync.Controls['IsoPathBox'].Text = $dialog.FileName
+    $sizeGb = [math]::Round((Get-Item $dialog.FileName).Length / 1GB, 2)
+    Add-GwtLog "ISO selecionada: $($dialog.FileName) ($sizeGb GB)"
+})
+
+$sync.Controls['IsoMountButton'].Add_Click({
+    if ($sync.Busy) { return }
+    if (-not (Test-GwtAdmin)) {
+        [System.Windows.MessageBox]::Show($Window, 'Criar ISO exige Administrador. Use "Abrir como Administrador".', 'Administrador necessário', 'OK', 'Warning') | Out-Null
+        return
+    }
+    $iso = $sync.Controls['IsoPathBox'].Text
+    if (-not $iso -or $iso -eq 'Nenhuma ISO selecionada...' -or -not (Test-Path $iso)) {
+        [System.Windows.MessageBox]::Show($Window, 'Selecione uma ISO válida primeiro.', 'ISO', 'OK', 'Warning') | Out-Null
+        return
+    }
+    Invoke-GwtRunspace -ScriptBlock {
+        param($p)
+        Invoke-GwtIsoMountWorker -IsoPath $p
+    } -Argument $iso
+})
+
+$sync.Controls['IsoModifyButton'].Add_Click({
+    if ($sync.Busy) { return }
+    $item = [string]$sync.Controls['IsoEditionCombo'].SelectedItem
+    if (-not $item) { return }
+    $index = 1
+    if ($item -match '^(\d+):') { $index = [int]$Matches[1] }
+    $name = ($item -replace '^\d+:\s*', '')
+    $inject = [bool]$sync.Controls['IsoInjectDriversCheck'].IsChecked
+    $msg = "Modificar a install.wim da edição:`n$name`n`nIsso copia a ISO (~5-6 GB), remove bloatware, aplica os ajustes e recria a imagem. Pode levar de 15 a 40 minutos e usa bastante disco temporário.`n`nContinuar?"
+    if ([System.Windows.MessageBox]::Show($Window, $msg, 'Confirmar modificação', 'YesNo', 'Warning') -ne 'Yes') { return }
+    Invoke-GwtRunspace -ScriptBlock {
+        param($arg)
+        Invoke-GwtIsoModifyWorker -Index $arg.Index -EditionName $arg.Name -InjectDrivers $arg.Inject
+    } -Argument @{ Index = $index; Name = $name; Inject = $inject }
+})
+
+$sync.Controls['IsoExportButton'].Add_Click({
+    if ($sync.Busy) { return }
+    if (-not $sync.IsoReady) {
+        [System.Windows.MessageBox]::Show($Window, 'Modifique a imagem (passo 3) antes de exportar.', 'Ainda não pronto', 'OK', 'Warning') | Out-Null
+        return
+    }
+    $dialog = New-Object Microsoft.Win32.SaveFileDialog
+    $dialog.Title = 'Salvar a ISO modificada'
+    $dialog.Filter = 'Imagens ISO (*.iso)|*.iso'
+    $dialog.FileName = "Windows11_Genius_$(Get-Date -Format 'yyyyMMdd').iso"
+    if ($dialog.ShowDialog($Window) -ne $true) { return }
+    Invoke-GwtRunspace -ScriptBlock {
+        param($out)
+        Invoke-GwtIsoExportWorker -OutputPath $out
+    } -Argument $dialog.FileName
+})
+
+$sync.Controls['IsoCleanButton'].Add_Click({
+    if ($sync.Busy) { return }
+    if ([System.Windows.MessageBox]::Show($Window, 'Descartar o trabalho atual da ISO e apagar a pasta temporária?', 'Limpar e recomeçar', 'YesNo', 'Warning') -ne 'Yes') { return }
+    Invoke-GwtRunspace -ScriptBlock { Invoke-GwtIsoCleanWorker }
+})
+
 $sync.Controls['ExportPresetButton'].Add_Click({
     try {
         $dialog = New-Object Microsoft.Win32.SaveFileDialog
@@ -3009,7 +3537,29 @@ function Invoke-PendingUiAction {
         }
         'DiagReady' {
             $sync.Controls['DiagnosticText'].Text = $sync.DiagReport
-            $sync.Controls['MainTabs'].SelectedIndex = 6
+            $sync.Controls['MainTabs'].SelectedIndex = 7
+        }
+        'IsoEditions' {
+            $combo = $sync.Controls['IsoEditionCombo']
+            $combo.Items.Clear()
+            foreach ($e in $sync.IsoEditions) { [void]$combo.Items.Add($e) }
+            $proIdx = -1
+            for ($i = 0; $i -lt $combo.Items.Count; $i++) {
+                if ($combo.Items[$i] -match 'Windows 11 Pro(?![\w ])') { $proIdx = $i; break }
+            }
+            if ($combo.Items.Count -gt 0) { $combo.SelectedIndex = [Math]::Max($proIdx, 0) }
+            $combo.IsEnabled = $true
+            $sync.Controls['IsoModifyButton'].IsEnabled = $true
+        }
+        'IsoModified' {
+            $sync.Controls['IsoExportButton'].IsEnabled = $true
+        }
+        'IsoReset' {
+            $sync.Controls['IsoPathBox'].Text = 'Nenhuma ISO selecionada...'
+            $sync.Controls['IsoEditionCombo'].Items.Clear()
+            $sync.Controls['IsoEditionCombo'].IsEnabled = $false
+            $sync.Controls['IsoModifyButton'].IsEnabled = $false
+            $sync.Controls['IsoExportButton'].IsEnabled = $false
         }
     }
 }
@@ -3018,7 +3568,8 @@ $ActionButtons = @('AnalyzeButton', 'MigrateButton', 'CopyOnlyButton', 'NetworkR
                    'WingetInstallButton', 'WingetUpgradeButton', 'PreferencesApplyButton',
                    'PrivacyApplyButton', 'DebloatRemoveButton', 'FeatureInstallButton',
                    'SystemRepairButton', 'UpdateResetButton', 'WingetFixButton', 'NtpFixButton',
-                   'DnsApplyButton', 'PerfEnableButton', 'PerfDisableButton', 'DiagRunButton')
+                   'DnsApplyButton', 'PerfEnableButton', 'PerfDisableButton', 'DiagRunButton',
+                   'IsoMountButton', 'IsoModifyButton', 'IsoExportButton', 'IsoCleanButton')
 
 $UiTimer = New-Object System.Windows.Threading.DispatcherTimer
 $UiTimer.Interval = [TimeSpan]::FromMilliseconds(200)
@@ -3108,7 +3659,8 @@ if ($SmokeTest) {
     $issues = @()
     $required = @('MainTabs', 'DrivePanel', 'FolderList', 'NetworkList', 'PackageList',
                   'PreferencesList', 'PrivacyList', 'AppxList', 'FeatureList', 'DnsCombo',
-                  'LegacyPanelList', 'LogBox', 'Progress', 'StatusText') + $ActionButtons
+                  'LegacyPanelList', 'IsoPathBox', 'IsoEditionCombo', 'IsoInjectDriversCheck',
+                  'LogBox', 'Progress', 'StatusText') + $ActionButtons
     foreach ($name in $required) {
         if (-not $sync.Controls.ContainsKey($name) -or $null -eq $sync.Controls[$name]) { $issues += $name }
     }
