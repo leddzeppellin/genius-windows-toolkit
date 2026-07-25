@@ -60,6 +60,7 @@ Catálogo amplo (mais de 200 programas) organizado em categorias: Navegadores, C
 
 - Busca instantânea, botões **Kit básico / Tudo / Limpar**
 - Instalação silenciosa com resumo final (instalados × falhas)
+- **Desinstalar** os programas marcados e **Detectar instalados** (marca no catálogo o que já está na máquina)
 - **Atualizar tudo** (`winget upgrade --all`) em um clique
 
 ## ⚙️ Ajustes
@@ -80,6 +81,7 @@ Botões de atalho **Só essenciais** e **Limpar**. Tudo com backup `.reg` antes.
 
 - **Recursos do Windows**: .NET 3.5, Hyper-V, WSL, Windows Sandbox, cliente NFS, componentes de mídia legados, Telnet, backup diário do registro e recuperação por F8.
 - **Correções rápidas**: reparar sistema (DISM + SFC), resetar o Windows Update, reinstalar o winget e corrigir o relógio (NTP).
+- **Política de Windows Update**: Padrão (restaurar), Só segurança (mantém correções críticas, adia recursos por 1 ano, não reinicia com você logado) ou Desativar — com backup `.reg` antes.
 - **DNS**: aplicar Google, Cloudflare (e variante que bloqueia malware), OpenDNS, Quad9 ou AdGuard nos adaptadores ativos — ou voltar ao automático.
 - **Plano de energia**: ativar/remover o Desempenho Máximo.
 - **Painéis clássicos**: atalhos para Painel de Controle, Gerenciador de Dispositivos, Serviços, Gerenciamento de Disco e outros.

@@ -1269,6 +1269,169 @@ function Invoke-GwtWingetUpgradeWorker {
     }
 }
 
+function Invoke-GwtWingetUninstallWorker {
+    param([object[]]$Selected)
+
+    try {
+        $sync.Busy = $true
+        $sync.ProgressMax = [double]$Selected.Count
+        $sync.ProgressValue = [double]0
+        Add-GwtLog "================ DESINSTALAÇÃO VIA WINGET ($($Selected.Count) pacote(s)) ================"
+
+        $okList = New-Object System.Collections.Generic.List[string]
+        $failList = New-Object System.Collections.Generic.List[string]
+        $index = 0
+
+        foreach ($pkg in $Selected) {
+            $index++
+            $pkgId = [string]$pkg.Id
+            if ($pkgId -like 'msstore:*') { $pkgId = $pkgId.Substring(8) }
+            $sync.StatusText = "Desinstalando $($pkg.Name) ($index de $($Selected.Count))..."
+            Add-GwtLog "▶ [$index/$($Selected.Count)] $($pkg.Name) ($pkgId)"
+
+            & winget.exe uninstall --id $pkgId -e --silent --disable-interactivity --accept-source-agreements 2>&1 | ForEach-Object {
+                $line = ([string]$_).Trim()
+                if ($line -and $line.Length -le 220 -and $line -notmatch '^[\s\-\\|/█▒░]+$') { Add-GwtLog "    $line" }
+            }
+            $code = $LASTEXITCODE
+            if ($code -eq 0) { $okList.Add($pkg.Name); Add-GwtLog "$($pkg.Name): desinstalado." 'Success' }
+            else { $failList.Add($pkg.Name); Add-GwtLog "$($pkg.Name): não desinstalado (código 0x$('{0:X8}' -f $code) — talvez não esteja instalado)." 'Warn' }
+            $sync.ProgressValue = [double]$index
+        }
+
+        Add-GwtLog "================ RESULTADO: $($okList.Count) removido(s), $($failList.Count) sem ação ================" $(if ($failList.Count -eq 0) { 'Success' } else { 'Warn' })
+        Request-GwtUi @{ Action = 'Message'; Title = 'Desinstalação concluída'; Kind = 'Info'
+                         Text = "Removidos: $($okList.Count)`nSem ação (talvez ausentes): $($failList.Count)" }
+    }
+    catch {
+        Add-GwtLog "Falha na desinstalação: $($_.Exception.Message)" 'Error'
+    }
+    finally {
+        $sync.Busy = $false
+        $sync.ProgressMax = [double]0
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
+function Invoke-GwtDetectInstalledWorker {
+    try {
+        $sync.Busy = $true
+        $sync.StatusText = 'Detectando programas instalados...'
+        Add-GwtLog 'Consultando o winget para detectar o que já está instalado...'
+
+        $installed = @{}
+        & winget.exe list --disable-interactivity --accept-source-agreements 2>&1 | ForEach-Object {
+            $line = [string]$_
+            # Captura tokens que parecem IDs winget (Editor.Produto)
+            foreach ($m in [regex]::Matches($line, '[A-Za-z0-9][A-Za-z0-9\.\-\+]+\.[A-Za-z0-9][A-Za-z0-9\.\-\+]+')) {
+                $installed[$m.Value.ToLower()] = $true
+            }
+        }
+        $sync['DetectedInstalled'] = $installed
+        Add-GwtLog "Detecção concluída ($($installed.Count) identificadores encontrados)." 'Success'
+        Request-GwtUi @{ Action = 'MarkInstalled' }
+    }
+    catch {
+        Add-GwtLog "Falha na detecção: $($_.Exception.Message)" 'Error'
+    }
+    finally {
+        $sync.Busy = $false
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
+function Invoke-GwtUpdatePolicyWorker {
+    param([string]$Mode)
+
+    try {
+        $sync.Busy = $true
+        $sync.StatusText = "Aplicando política de Windows Update ($Mode)..."
+        Add-GwtLog "================ WINDOWS UPDATE: $Mode ================"
+
+        $backup = Backup-GwtRegistrySet -Name 'winupdate' -Keys @(
+            'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate',
+            'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU',
+            'HKLM\SOFTWARE\Policies\Microsoft\Windows\DriverSearching',
+            'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\DeliveryOptimization\Config'
+        )
+        Add-GwtLog "Backup criado em: $backup" 'Success'
+
+        $auPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU'
+        $wuPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
+        $drvPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DriverSearching'
+        $doPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\DeliveryOptimization\Config'
+        $updateTasks = @(
+            '\Microsoft\Windows\InstallService\*', '\Microsoft\Windows\UpdateOrchestrator\*',
+            '\Microsoft\Windows\UpdateAssistant\*', '\Microsoft\Windows\WaaSMedic\*',
+            '\Microsoft\Windows\WindowsUpdate\*', '\Microsoft\WindowsUpdate\*'
+        )
+
+        switch ($Mode) {
+            'Disable' {
+                Add-GwtLog 'Desativando o Windows Update (serviços, tarefas e políticas)...'
+                Set-GwtRegistryEntry -Path $auPath -Name 'NoAutoUpdate' -Value 1 -Type DWord
+                Set-GwtRegistryEntry -Path $auPath -Name 'AUOptions' -Value 1 -Type DWord
+                Set-GwtRegistryEntry -Path $doPath -Name 'DODownloadMode' -Value 0 -Type DWord
+                foreach ($svc in 'BITS', 'wuauserv', 'UsoSvc') {
+                    Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue
+                    Set-Service -Name $svc -StartupType Disabled -ErrorAction SilentlyContinue
+                }
+                Remove-Item -Path 'C:\Windows\SoftwareDistribution\*' -Recurse -Force -ErrorAction SilentlyContinue
+                foreach ($t in $updateTasks) { Get-ScheduledTask -TaskPath $t -ErrorAction SilentlyContinue | Disable-ScheduledTask -ErrorAction SilentlyContinue }
+                Add-GwtLog 'Windows Update DESATIVADO. Reinício recomendado. (Não recomendado a longo prazo.)' 'Warn'
+            }
+            'Security' {
+                Add-GwtLog 'Aplicando modo recomendado (só segurança, adia recursos por 1 ano)...'
+                # Reativa serviços/tarefas primeiro
+                Remove-ItemProperty -Path $auPath -Name 'NoAutoUpdate' -ErrorAction SilentlyContinue
+                Remove-ItemProperty -Path $doPath -Name 'DODownloadMode' -ErrorAction SilentlyContinue
+                Set-Service -Name BITS -StartupType Manual -ErrorAction SilentlyContinue
+                Set-Service -Name wuauserv -StartupType Manual -ErrorAction SilentlyContinue
+                Set-Service -Name UsoSvc -StartupType Automatic -ErrorAction SilentlyContinue
+                Start-Service -Name UsoSvc -ErrorAction SilentlyContinue
+                foreach ($t in $updateTasks) { Get-ScheduledTask -TaskPath $t -ErrorAction SilentlyContinue | Enable-ScheduledTask -ErrorAction SilentlyContinue }
+                # Não oferecer drivers pelo Windows Update
+                Set-GwtRegistryEntry -Path $drvPath -Name 'DontPromptForWindowsUpdate' -Value 1 -Type DWord
+                Set-GwtRegistryEntry -Path $drvPath -Name 'DontSearchWindowsUpdate' -Value 1 -Type DWord
+                Set-GwtRegistryEntry -Path $drvPath -Name 'DriverUpdateWizardWuSearchEnabled' -Value 0 -Type DWord
+                Set-GwtRegistryEntry -Path $wuPath -Name 'ExcludeWUDriversInQualityUpdate' -Value 1 -Type DWord
+                # Adiar recursos 365 dias, qualidade 4 dias
+                Set-GwtRegistryEntry -Path $wuPath -Name 'DeferFeatureUpdates' -Value 1 -Type DWord
+                Set-GwtRegistryEntry -Path $wuPath -Name 'DeferFeatureUpdatesPeriodInDays' -Value 365 -Type DWord
+                Set-GwtRegistryEntry -Path $wuPath -Name 'DeferQualityUpdates' -Value 1 -Type DWord
+                Set-GwtRegistryEntry -Path $wuPath -Name 'DeferQualityUpdatesPeriodInDays' -Value 4 -Type DWord
+                # Não reiniciar com usuário logado
+                Set-GwtRegistryEntry -Path $auPath -Name 'AUOptions' -Value 4 -Type DWord
+                Set-GwtRegistryEntry -Path $auPath -Name 'NoAutoRebootWithLoggedOnUsers' -Value 1 -Type DWord
+                Add-GwtLog 'Windows Update em modo recomendado (segurança em dia, recursos adiados).' 'Success'
+            }
+            'Default' {
+                Add-GwtLog 'Restaurando as configurações padrão do Windows Update...'
+                $reset = @(
+                    @{ P=$auPath; N=@('NoAutoUpdate', 'AUOptions', 'NoAutoRebootWithLoggedOnUsers', 'AUPowerManagement') },
+                    @{ P=$wuPath; N=@('ExcludeWUDriversInQualityUpdate', 'DeferFeatureUpdates', 'DeferFeatureUpdatesPeriodInDays', 'DeferQualityUpdates', 'DeferQualityUpdatesPeriodInDays') },
+                    @{ P=$drvPath; N=@('DontPromptForWindowsUpdate', 'DontSearchWindowsUpdate', 'DriverUpdateWizardWuSearchEnabled') },
+                    @{ P='HKLM:\SOFTWARE\Policies\Microsoft\Windows\Device Metadata'; N=@('PreventDeviceMetadataFromNetwork') },
+                    @{ P=$doPath; N=@('DODownloadMode') }
+                )
+                foreach ($e in $reset) { foreach ($n in $e.N) { Remove-ItemProperty -Path $e.P -Name $n -ErrorAction SilentlyContinue } }
+                foreach ($svc in 'BITS', 'wuauserv') { Set-Service -Name $svc -StartupType Manual -ErrorAction SilentlyContinue }
+                Set-Service -Name UsoSvc -StartupType Automatic -ErrorAction SilentlyContinue
+                foreach ($t in $updateTasks) { Get-ScheduledTask -TaskPath $t -ErrorAction SilentlyContinue | Enable-ScheduledTask -ErrorAction SilentlyContinue }
+                Add-GwtLog 'Windows Update restaurado ao padrão.' 'Success'
+            }
+        }
+        Request-GwtUi @{ Action = 'Message'; Title = 'Windows Update'; Kind = 'Info'; Text = "Política aplicada: $Mode.`nUm reinício pode ser necessário." }
+    }
+    catch {
+        Add-GwtLog "Falha na política de Update: $($_.Exception.Message)" 'Error'
+    }
+    finally {
+        $sync.Busy = $false
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
 # ---- Aplicadores genéricos (usados por Ajustes e Privacidade) ----
 
 function Set-GwtRegistryEntry {
@@ -2742,7 +2905,9 @@ function Invoke-GwtRunspace {
 
                             <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
                                 <Button Name="WingetInstallButton" Style="{StaticResource GoldButton}" Content="📦  Instalar selecionados"/>
-                                <Button Name="WingetUpgradeButton" Style="{StaticResource GhostButton}" Content="⬆️  Atualizar tudo (winget upgrade)"/>
+                                <Button Name="WingetUninstallButton" Style="{StaticResource GhostButton}" Content="🗑️  Desinstalar selecionados"/>
+                                <Button Name="WingetUpgradeButton" Style="{StaticResource GhostButton}" Content="⬆️  Atualizar tudo"/>
+                                <Button Name="WingetDetectButton" Style="{StaticResource GhostButton}" Content="🔍  Detectar instalados"/>
                                 <TextBlock Name="PackageCountText" Text="" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
                             </StackPanel>
                         </Grid>
@@ -2861,6 +3026,13 @@ function Invoke-GwtRunspace {
                                             <Button Name="UpdateResetButton" Style="{StaticResource GhostButton}" Content="♻️ Resetar Windows Update" Margin="0,0,8,8"/>
                                             <Button Name="WingetFixButton" Style="{StaticResource GhostButton}" Content="📦 Reinstalar winget" Margin="0,0,8,8"/>
                                             <Button Name="NtpFixButton" Style="{StaticResource GhostButton}" Content="🕒 Corrigir relógio (NTP)" Margin="0,0,8,8"/>
+                                        </WrapPanel>
+
+                                        <TextBlock Text="Política de Windows Update" FontSize="18" FontWeight="Bold" Margin="0,16,0,8"/>
+                                        <WrapPanel>
+                                            <Button Name="UpdateDefaultButton" Style="{StaticResource GhostButton}" Content="✅ Padrão" Margin="0,0,8,8" ToolTip="Restaura as configurações padrão do Windows Update."/>
+                                            <Button Name="UpdateSecurityButton" Style="{StaticResource GhostButton}" Content="🛡️ Só segurança" Margin="0,0,8,8" ToolTip="Mantém correções de segurança, adia recursos por 1 ano, não reinicia com você logado."/>
+                                            <Button Name="UpdateDisableButton" Style="{StaticResource GhostButton}" Content="⛔ Desativar" Margin="0,0,8,8" ToolTip="Desativa completamente o Windows Update (não recomendado a longo prazo)."/>
                                         </WrapPanel>
 
                                         <TextBlock Text="Servidor DNS" FontSize="18" FontWeight="Bold" Margin="0,16,0,8"/>
@@ -3514,6 +3686,30 @@ $sync.Controls['WingetUpgradeButton'].Add_Click({
     Invoke-GwtRunspace -ScriptBlock { Invoke-GwtWingetUpgradeWorker }
 })
 
+$sync.Controls['WingetUninstallButton'].Add_Click({
+    if ($sync.Busy) { return }
+    if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+        [System.Windows.MessageBox]::Show($Window, 'winget não foi encontrado nesta máquina.', 'winget indisponível', 'OK', 'Warning') | Out-Null
+        return
+    }
+    $selected = Get-SelectedPackages
+    if (-not $selected) { Add-GwtLog 'Nenhum programa marcado para desinstalar.' 'Warn'; return }
+    if ([System.Windows.MessageBox]::Show($Window, "Desinstalar $($selected.Count) programa(s) marcado(s)? (Só remove os que estiverem instalados.)", 'Confirmar desinstalação', 'YesNo', 'Warning') -ne 'Yes') { return }
+    Invoke-GwtRunspace -ScriptBlock {
+        param($packages)
+        Invoke-GwtWingetUninstallWorker -Selected $packages
+    } -Argument $selected
+})
+
+$sync.Controls['WingetDetectButton'].Add_Click({
+    if ($sync.Busy) { return }
+    if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+        [System.Windows.MessageBox]::Show($Window, 'winget não foi encontrado nesta máquina.', 'winget indisponível', 'OK', 'Warning') | Out-Null
+        return
+    }
+    Invoke-GwtRunspace -ScriptBlock { Invoke-GwtDetectInstalledWorker }
+})
+
 $sync.Controls['PackageDefaultButton'].Add_Click({ Set-PackageSelection -Mode Default })
 $sync.Controls['PackageAllButton'].Add_Click({ Set-PackageSelection -Mode All })
 $sync.Controls['PackageNoneButton'].Add_Click({ Set-PackageSelection -Mode None })
@@ -3606,6 +3802,23 @@ $sync.Controls['SystemRepairButton'].Add_Click({ Start-GwtFix -Fix 'SystemRepair
 $sync.Controls['UpdateResetButton'].Add_Click({ Start-GwtFix -Fix 'UpdateReset' -Label 'Reset do Windows Update' })
 $sync.Controls['WingetFixButton'].Add_Click({ Start-GwtFix -Fix 'WingetFix' -Label 'Reinstalar winget' })
 $sync.Controls['NtpFixButton'].Add_Click({ Start-GwtFix -Fix 'NtpFix' -Label 'Corrigir relógio (NTP)' })
+
+function Start-GwtUpdatePolicy {
+    param([string]$Mode, [string]$Label, [string]$Icon = 'Question')
+    if ($sync.Busy) { return }
+    if (-not (Test-GwtAdmin)) {
+        [System.Windows.MessageBox]::Show($Window, 'Alterar a política de Windows Update exige Administrador.', 'Administrador necessário', 'OK', 'Warning') | Out-Null
+        return
+    }
+    if ([System.Windows.MessageBox]::Show($Window, "Aplicar política de Windows Update: $Label?`n`nUm backup .reg é criado antes.", 'Windows Update', 'YesNo', $Icon) -ne 'Yes') { return }
+    Invoke-GwtRunspace -ScriptBlock {
+        param($m)
+        Invoke-GwtUpdatePolicyWorker -Mode $m
+    } -Argument $Mode
+}
+$sync.Controls['UpdateDefaultButton'].Add_Click({ Start-GwtUpdatePolicy -Mode 'Default' -Label 'Padrão (restaurar)' })
+$sync.Controls['UpdateSecurityButton'].Add_Click({ Start-GwtUpdatePolicy -Mode 'Security' -Label 'Só segurança (recomendado)' })
+$sync.Controls['UpdateDisableButton'].Add_Click({ Start-GwtUpdatePolicy -Mode 'Disable' -Label 'Desativar (não recomendado)' -Icon 'Warning' })
 
 $sync.Controls['DnsApplyButton'].Add_Click({
     if ($sync.Busy) { return }
@@ -3914,6 +4127,20 @@ function Invoke-PendingUiAction {
                 $sync.Controls['IsoUsbWriteButton'].IsEnabled = $true
             }
         }
+        'MarkInstalled' {
+            $installed = $sync['DetectedInstalled']
+            if (-not $installed) { return }
+            $count = 0
+            foreach ($child in $sync.Controls['PackageList'].Children) {
+                if ($child -is [System.Windows.Controls.CheckBox]) {
+                    $id = ([string]$child.Tag.Id)
+                    if ($id -like 'msstore:*') { $id = $id.Substring(8) }
+                    if ($installed.ContainsKey($id.ToLower())) { $child.IsChecked = $true; $count++ }
+                }
+            }
+            Update-PackageCount
+            Add-GwtLog "$count programa(s) do catálogo detectado(s) como instalado(s) e marcado(s)." 'Success'
+        }
         'IsoReset' {
             $sync.Controls['IsoPathBox'].Text = 'Nenhuma ISO selecionada...'
             $sync.Controls['IsoEditionCombo'].Items.Clear()
@@ -3926,9 +4153,10 @@ function Invoke-PendingUiAction {
 }
 
 $ActionButtons = @('AnalyzeButton', 'MigrateButton', 'CopyOnlyButton', 'NetworkRunButton',
-                   'WingetInstallButton', 'WingetUpgradeButton', 'PreferencesApplyButton',
-                   'PrivacyApplyButton', 'DebloatRemoveButton', 'FeatureInstallButton',
+                   'WingetInstallButton', 'WingetUninstallButton', 'WingetUpgradeButton', 'WingetDetectButton',
+                   'PreferencesApplyButton', 'PrivacyApplyButton', 'DebloatRemoveButton', 'FeatureInstallButton',
                    'SystemRepairButton', 'UpdateResetButton', 'WingetFixButton', 'NtpFixButton',
+                   'UpdateDefaultButton', 'UpdateSecurityButton', 'UpdateDisableButton',
                    'DnsApplyButton', 'PerfEnableButton', 'PerfDisableButton', 'DiagRunButton',
                    'IsoMountButton', 'IsoModifyButton', 'IsoExportButton', 'IsoCleanButton', 'IsoUsbWriteButton')
 
