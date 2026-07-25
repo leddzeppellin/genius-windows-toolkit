@@ -1313,6 +1313,197 @@ function Invoke-GwtWingetUninstallWorker {
     }
 }
 
+function Get-GwtInstallerInType {
+    # Descobre o tipo do instalador lendo o manifesto YAML que o winget download salva.
+    param([string]$AppDir)
+    $type = ''
+    $yaml = Get-ChildItem -LiteralPath $AppDir -Recurse -Filter '*.yaml' -ErrorAction SilentlyContinue |
+            Select-String -Pattern 'InstallerType:\s*(\S+)' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($yaml -and $yaml.Matches.Count -gt 0) { $type = $yaml.Matches[0].Groups[1].Value.Trim().ToLower() }
+    return $type
+}
+
+function Get-GwtKitInstallerFile {
+    param([string]$AppDir)
+    return Get-ChildItem -LiteralPath $AppDir -Recurse -ErrorAction SilentlyContinue -Include '*.msi', '*.exe', '*.msix', '*.appx', '*.msixbundle', '*.appxbundle' |
+           Sort-Object Length -Descending | Select-Object -First 1
+}
+
+function Invoke-GwtKitDownloadWorker {
+    param([object[]]$Selected, [string]$KitDir)
+
+    try {
+        $sync.Busy = $true
+        $sync.ProgressMax = [double]$Selected.Count
+        $sync.ProgressValue = [double]0
+        Add-GwtLog "================ BAIXAR KIT OFFLINE ($($Selected.Count)) ================"
+        Add-GwtLog "Pasta do kit: $KitDir"
+        New-Item -ItemType Directory -Path $KitDir -Force | Out-Null
+
+        $apps = New-Object System.Collections.Generic.List[object]
+        $okList = New-Object System.Collections.Generic.List[string]
+        $failList = New-Object System.Collections.Generic.List[string]
+        $index = 0
+
+        foreach ($pkg in $Selected) {
+            $index++
+            $pkgId = [string]$pkg.Id
+            if ($pkgId -like 'msstore:*') {
+                Add-GwtLog "$($pkg.Name): é da Microsoft Store — não dá para baixar para o kit offline. Pulando." 'Warn'
+                $failList.Add("$($pkg.Name) (Store)")
+                $sync.ProgressValue = [double]$index
+                continue
+            }
+            $folderName = ($pkgId -replace '[\\/:*?"<>| ]', '_')
+            $appDir = Join-Path $KitDir $folderName
+            New-Item -ItemType Directory -Path $appDir -Force | Out-Null
+
+            $sync.StatusText = "Baixando $($pkg.Name) ($index de $($Selected.Count))..."
+            Add-GwtLog "▶ [$index/$($Selected.Count)] $($pkg.Name) ($pkgId)"
+            & winget.exe download -e --id $pkgId --download-directory $appDir --accept-source-agreements --accept-package-agreements --disable-interactivity 2>&1 | ForEach-Object {
+                $line = ([string]$_).Trim()
+                if ($line -and $line.Length -le 220 -and $line -notmatch '^[\s\-\\|/█▒░]+$') { Add-GwtLog "    $line" }
+            }
+            $code = $LASTEXITCODE
+
+            $file = Get-GwtKitInstallerFile -AppDir $appDir
+            if ($code -eq 0 -and $file) {
+                $type = Get-GwtInstallerInType -AppDir $appDir
+                $apps.Add([pscustomobject]@{ Id = $pkgId; Name = $pkg.Name; Folder = $folderName; Type = $type })
+                $okList.Add($pkg.Name)
+                Add-GwtLog "$($pkg.Name): baixado ($($file.Name), tipo '$type')." 'Success'
+            }
+            else {
+                $failList.Add($pkg.Name)
+                Add-GwtLog "$($pkg.Name): download falhou (código 0x$('{0:X8}' -f $code))." 'Error'
+            }
+            $sync.ProgressValue = [double]$index
+        }
+
+        # Grava/atualiza o perfil kit.json (mescla com o que já existir)
+        $kitFile = Join-Path $KitDir 'kit.json'
+        $existing = @()
+        if (Test-Path $kitFile) {
+            try { $existing = @((Get-Content $kitFile -Raw | ConvertFrom-Json).Apps) } catch { }
+        }
+        $byId = @{}
+        foreach ($a in $existing) { if ($a.Id) { $byId[$a.Id] = $a } }
+        foreach ($a in $apps) { $byId[$a.Id] = $a }
+
+        [pscustomobject]@{
+            Tool      = 'GeniusWindowsToolkit'
+            CreatedAt = (Get-Date).ToString('o')
+            Apps      = @($byId.Values | Sort-Object Name)
+        } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $kitFile -Encoding UTF8
+
+        Add-GwtLog "================ KIT: $($okList.Count) baixado(s), $($failList.Count) falha(s). Perfil: $kitFile ================" $(if ($failList.Count -eq 0) { 'Success' } else { 'Warn' })
+        $summary = "Baixados: $($okList.Count)`nFalhas/pulados: $($failList.Count)`n`nPasta: $KitDir`n`nAgora você pode levar essa pasta no pendrive e usar 'Instalar do kit offline' em qualquer máquina, sem internet."
+        Request-GwtUi @{ Action = 'Message'; Title = 'Kit offline pronto'; Text = $summary; Kind = $(if ($failList.Count -eq 0) { 'Info' } else { 'Warning' }) }
+    }
+    catch {
+        Add-GwtLog "Falha ao baixar o kit: $($_.Exception.Message)" 'Error'
+        Request-GwtUi @{ Action = 'Message'; Title = 'Erro no kit'; Text = $_.Exception.Message; Kind = 'Error' }
+    }
+    finally {
+        $sync.Busy = $false
+        $sync.ProgressMax = [double]0
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
+function Invoke-GwtKitInstallWorker {
+    param([string]$KitDir)
+
+    try {
+        $sync.Busy = $true
+        $kitFile = Join-Path $KitDir 'kit.json'
+        if (-not (Test-Path $kitFile)) { throw "Perfil kit.json não encontrado em $KitDir. Baixe um kit primeiro." }
+
+        $kit = Get-Content $kitFile -Raw | ConvertFrom-Json
+        $apps = @($kit.Apps)
+        $sync.ProgressMax = [double]$apps.Count
+        $sync.ProgressValue = [double]0
+        Add-GwtLog "================ INSTALAR DO KIT OFFLINE ($($apps.Count)) ================"
+
+        $okList = New-Object System.Collections.Generic.List[string]
+        $failList = New-Object System.Collections.Generic.List[string]
+        $index = 0
+
+        foreach ($app in $apps) {
+            $index++
+            $appDir = Join-Path $KitDir ([string]$app.Folder)
+            $sync.StatusText = "Instalando $($app.Name) ($index de $($apps.Count))..."
+            Add-GwtLog "▶ [$index/$($apps.Count)] $($app.Name)"
+
+            $file = Get-GwtKitInstallerFile -AppDir $appDir
+            if (-not $file) {
+                $failList.Add($app.Name)
+                Add-GwtLog "$($app.Name): instalador não encontrado em $appDir." 'Error'
+                $sync.ProgressValue = [double]$index
+                continue
+            }
+
+            $type = ([string]$app.Type).ToLower()
+            $ext = $file.Extension.ToLower()
+            try {
+                if ($ext -eq '.msi') {
+                    $p = Start-Process msiexec.exe -ArgumentList @('/i', "`"$($file.FullName)`"", '/qn', '/norestart') -Wait -PassThru
+                    $rc = $p.ExitCode
+                }
+                elseif ($ext -in '.msix', '.appx', '.msixbundle', '.appxbundle') {
+                    Add-AppxPackage -Path $file.FullName -ErrorAction Stop
+                    $rc = 0
+                }
+                else {
+                    # .exe — usa o switch silencioso conforme o tipo do manifesto
+                    $silent = switch -Regex ($type) {
+                        'nullsoft'   { @('/S') }
+                        'inno'       { @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') }
+                        'burn|wix|msi' { @('/quiet', '/norestart') }
+                        default      { $null }
+                    }
+                    if ($null -ne $silent) {
+                        $p = Start-Process $file.FullName -ArgumentList $silent -Wait -PassThru
+                        $rc = $p.ExitCode
+                    }
+                    else {
+                        Add-GwtLog "$($app.Name): tipo de instalador desconhecido — abrindo de forma interativa." 'Warn'
+                        $p = Start-Process $file.FullName -Wait -PassThru
+                        $rc = $p.ExitCode
+                    }
+                }
+
+                if ($rc -eq 0 -or $rc -eq 3010) {
+                    $okList.Add($app.Name)
+                    Add-GwtLog "$($app.Name): instalado$(if ($rc -eq 3010) { ' (reinício pendente)' })." 'Success'
+                }
+                else {
+                    $failList.Add($app.Name)
+                    Add-GwtLog "$($app.Name): instalador retornou código $rc." 'Warn'
+                }
+            }
+            catch {
+                $failList.Add($app.Name)
+                Add-GwtLog "$($app.Name): $($_.Exception.Message)" 'Error'
+            }
+            $sync.ProgressValue = [double]$index
+        }
+
+        Add-GwtLog "================ KIT INSTALADO: $($okList.Count) ok, $($failList.Count) falha(s) ================" $(if ($failList.Count -eq 0) { 'Success' } else { 'Warn' })
+        Request-GwtUi @{ Action = 'Message'; Title = 'Instalação offline concluída'; Kind = $(if ($failList.Count -eq 0) { 'Info' } else { 'Warning' })
+                         Text = "Instalados: $($okList.Count)`nFalhas: $($failList.Count)" }
+    }
+    catch {
+        Add-GwtLog "Falha ao instalar do kit: $($_.Exception.Message)" 'Error'
+        Request-GwtUi @{ Action = 'Message'; Title = 'Erro no kit offline'; Text = $_.Exception.Message; Kind = 'Error' }
+    }
+    finally {
+        $sync.Busy = $false
+        $sync.ProgressMax = [double]0
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
 function Invoke-GwtDetectInstalledWorker {
     try {
         $sync.Busy = $true
@@ -2903,12 +3094,22 @@ function Invoke-GwtRunspace {
                                 </ScrollViewer>
                             </Border>
 
-                            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
-                                <Button Name="WingetInstallButton" Style="{StaticResource GoldButton}" Content="📦  Instalar selecionados"/>
-                                <Button Name="WingetUninstallButton" Style="{StaticResource GhostButton}" Content="🗑️  Desinstalar selecionados"/>
-                                <Button Name="WingetUpgradeButton" Style="{StaticResource GhostButton}" Content="⬆️  Atualizar tudo"/>
-                                <Button Name="WingetDetectButton" Style="{StaticResource GhostButton}" Content="🔍  Detectar instalados"/>
-                                <TextBlock Name="PackageCountText" Text="" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                            <StackPanel Grid.Row="2" Margin="0,12,0,0">
+                                <WrapPanel>
+                                    <Button Name="WingetInstallButton" Style="{StaticResource GoldButton}" Content="📦  Instalar selecionados" Margin="0,0,8,8"/>
+                                    <Button Name="WingetUninstallButton" Style="{StaticResource GhostButton}" Content="🗑️  Desinstalar selecionados" Margin="0,0,8,8"/>
+                                    <Button Name="WingetUpgradeButton" Style="{StaticResource GhostButton}" Content="⬆️  Atualizar tudo" Margin="0,0,8,8"/>
+                                    <Button Name="WingetDetectButton" Style="{StaticResource GhostButton}" Content="🔍  Detectar instalados" Margin="0,0,8,8"/>
+                                    <TextBlock Name="PackageCountText" Text="" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="4,0,0,8"/>
+                                </WrapPanel>
+                                <Border Background="{StaticResource SoftBrush}" CornerRadius="10" Padding="10" Margin="0,2,0,0">
+                                    <WrapPanel>
+                                        <TextBlock Text="💾 Kit offline (pendrive):" Foreground="{StaticResource GoldBrush}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                        <Button Name="KitDownloadButton" Style="{StaticResource GhostButton}" Content="⬇️  Baixar instaladores dos marcados" Margin="0,0,8,0"/>
+                                        <Button Name="KitInstallButton" Style="{StaticResource GoldButton}" Content="📥  Instalar do kit offline" Margin="0,0,8,0"/>
+                                        <Button Name="KitOpenButton" Style="{StaticResource GhostButton}" Content="🗂️ Abrir pasta" Margin="0"/>
+                                    </WrapPanel>
+                                </Border>
                             </StackPanel>
                         </Grid>
                     </TabItem>
@@ -3710,6 +3911,61 @@ $sync.Controls['WingetDetectButton'].Add_Click({
     Invoke-GwtRunspace -ScriptBlock { Invoke-GwtDetectInstalledWorker }
 })
 
+# Pasta do kit offline: ao lado do app (pendrive) quando roda de arquivo; senão, pergunta.
+function Get-GwtKitDir {
+    param([bool]$MustExist = $false)
+    $base = $null
+    if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) { $base = Split-Path -Parent $PSCommandPath }
+    if ($base) { return (Join-Path $base 'GeniusOfflineKit') }
+
+    # Sem caminho de script (execução via irm|iex): pede a pasta
+    Add-Type -AssemblyName System.Windows.Forms
+    $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dlg.Description = if ($MustExist) { 'Selecione a pasta GeniusOfflineKit (com o kit.json)' } else { 'Escolha onde salvar o kit offline (será criada a pasta GeniusOfflineKit)' }
+    if ($dlg.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return $null }
+    if ($MustExist -and (Test-Path (Join-Path $dlg.SelectedPath 'kit.json'))) { return $dlg.SelectedPath }
+    return (Join-Path $dlg.SelectedPath 'GeniusOfflineKit')
+}
+
+$sync.Controls['KitDownloadButton'].Add_Click({
+    if ($sync.Busy) { return }
+    if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+        [System.Windows.MessageBox]::Show($Window, 'Baixar o kit exige o winget (e internet).', 'winget indisponível', 'OK', 'Warning') | Out-Null
+        return
+    }
+    $selected = Get-SelectedPackages
+    if (-not $selected) { Add-GwtLog 'Nenhum programa marcado para baixar.' 'Warn'; return }
+    $kitDir = Get-GwtKitDir
+    if (-not $kitDir) { return }
+    if ([System.Windows.MessageBox]::Show($Window, "Baixar os instaladores de $($selected.Count) programa(s) para o kit offline?`n`nPasta: $kitDir`n`nDepois é só levar essa pasta no pendrive.", 'Baixar kit offline', 'YesNo', 'Question') -ne 'Yes') { return }
+    Invoke-GwtRunspace -ScriptBlock {
+        param($arg)
+        Invoke-GwtKitDownloadWorker -Selected $arg.Selected -KitDir $arg.KitDir
+    } -Argument @{ Selected = $selected; KitDir = $kitDir }
+})
+
+$sync.Controls['KitInstallButton'].Add_Click({
+    if ($sync.Busy) { return }
+    $kitDir = Get-GwtKitDir -MustExist $true
+    if (-not $kitDir) { return }
+    if (-not (Test-Path (Join-Path $kitDir 'kit.json'))) {
+        [System.Windows.MessageBox]::Show($Window, "Nenhum kit encontrado em:`n$kitDir`n`nBaixe um kit primeiro (com internet) ou aponte para a pasta GeniusOfflineKit do pendrive.", 'Kit não encontrado', 'OK', 'Warning') | Out-Null
+        return
+    }
+    if ([System.Windows.MessageBox]::Show($Window, "Instalar todos os programas do kit offline?`n`nPasta: $kitDir", 'Instalar do kit offline', 'YesNo', 'Question') -ne 'Yes') { return }
+    Invoke-GwtRunspace -ScriptBlock {
+        param($dir)
+        Invoke-GwtKitInstallWorker -KitDir $dir
+    } -Argument $kitDir
+})
+
+$sync.Controls['KitOpenButton'].Add_Click({
+    $kitDir = Get-GwtKitDir
+    if (-not $kitDir) { return }
+    New-Item -ItemType Directory -Path $kitDir -Force -ErrorAction SilentlyContinue | Out-Null
+    Start-Process explorer.exe $kitDir
+})
+
 $sync.Controls['PackageDefaultButton'].Add_Click({ Set-PackageSelection -Mode Default })
 $sync.Controls['PackageAllButton'].Add_Click({ Set-PackageSelection -Mode All })
 $sync.Controls['PackageNoneButton'].Add_Click({ Set-PackageSelection -Mode None })
@@ -4154,6 +4410,7 @@ function Invoke-PendingUiAction {
 
 $ActionButtons = @('AnalyzeButton', 'MigrateButton', 'CopyOnlyButton', 'NetworkRunButton',
                    'WingetInstallButton', 'WingetUninstallButton', 'WingetUpgradeButton', 'WingetDetectButton',
+                   'KitDownloadButton', 'KitInstallButton',
                    'PreferencesApplyButton', 'PrivacyApplyButton', 'DebloatRemoveButton', 'FeatureInstallButton',
                    'SystemRepairButton', 'UpdateResetButton', 'WingetFixButton', 'NtpFixButton',
                    'UpdateDefaultButton', 'UpdateSecurityButton', 'UpdateDisableButton',
@@ -4267,7 +4524,7 @@ if ($SmokeTest) {
                   'PreferencesList', 'PrivacyList', 'AppxList', 'FeatureList', 'DnsCombo',
                   'LegacyPanelList', 'IsoPathBox', 'IsoEditionCombo', 'IsoInjectDriversCheck',
                   'IsoSkipOobeCheck', 'IsoAccountBox', 'IsoUsbCombo', 'IsoUsbRefreshButton',
-                  'LogBox', 'Progress', 'StatusText') + $ActionButtons
+                  'KitOpenButton', 'LogBox', 'Progress', 'StatusText') + $ActionButtons
     foreach ($name in $required) {
         if (-not $sync.Controls.ContainsKey($name) -or $null -eq $sync.Controls[$name]) { $issues += $name }
     }
