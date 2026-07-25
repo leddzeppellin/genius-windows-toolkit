@@ -1,0 +1,14 @@
+Salve a logo da Genius Info aqui com este nome exato:
+
+    genius-info-logo.png
+
+De preferência com FUNDO TRANSPARENTE (PNG). Se o fundo for branco/claro,
+sem problema — o app já mostra a logo dentro de um "selo" claro arredondado,
+então fica bonito de qualquer forma.
+
+Depois de salvar, rode:
+
+    powershell -File tools\embed-logo.ps1
+
+Isso converte a imagem para base64 e embute no GeniusToolkit.ps1, para a logo
+aparecer inclusive quando o app roda por "irm | iex".
