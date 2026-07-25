@@ -79,6 +79,7 @@ Catálogo amplo (mais de 200 programas) organizado em categorias: Navegadores, C
 - **Desinstalar** os programas marcados e **Detectar instalados** (marca no catálogo o que já está na máquina)
 - **Atualizar tudo** (`winget upgrade --all`) em um clique
 - **Kit offline** — baixa os instaladores dos programas marcados para uma pasta `GeniusOfflineKit\` (ao lado do app, no pendrive) e salva um perfil `kit.json`. Depois, em qualquer máquina **sem internet**, o botão **Instalar do kit offline** invoca os instaladores locais em modo silencioso. Perfeito para montar um kit de bancada uma vez e reusar offline.
+- **Verificar atualizações do kit** — compara a versão baixada de cada programa com a mais recente do winget, lista o que mudou (`v1.2 → v1.5`) e, se você confirmar, **baixa e substitui** só os instaladores desatualizados, mantendo o kit sempre em dia.
 
 ## ⚙️ Ajustes
 

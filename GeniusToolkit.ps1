@@ -89,6 +89,8 @@ $sync.IsoWorkDir     = $null
 $sync.IsoContentsDir = $null
 $sync.IsoReady       = $false   # install.wim já modificado, pronto para exportar
 $sync.IsoUsbDisks    = @()
+$sync.KitUpdates     = @()      # apps do kit com atualização disponível
+$sync.KitDir         = $null
 
 New-Item -ItemType Directory -Path $sync.BackupRoot, $sync.LogRoot, $sync.ReportRoot -Force | Out-Null
 
@@ -1313,6 +1315,20 @@ function Invoke-GwtWingetUninstallWorker {
     }
 }
 
+function Get-GwtWingetLatestVersion {
+    # Lê a versão mais recente publicada no winget para um id (independente do idioma).
+    param([string]$Id)
+    try {
+        $out = & winget.exe show --id $Id -e --disable-interactivity --accept-source-agreements 2>&1
+        foreach ($line in $out) {
+            $m = [regex]::Match([string]$line, '(?i)vers(?:ion|[aã]o)\s*:\s*(\S+)')
+            if ($m.Success) { return $m.Groups[1].Value.Trim() }
+        }
+    }
+    catch { }
+    return ''
+}
+
 function Get-GwtInstallerInType {
     # Descobre o tipo do instalador lendo o manifesto YAML que o winget download salva.
     param([string]$AppDir)
@@ -1369,9 +1385,10 @@ function Invoke-GwtKitDownloadWorker {
             $file = Get-GwtKitInstallerFile -AppDir $appDir
             if ($code -eq 0 -and $file) {
                 $type = Get-GwtInstallerInType -AppDir $appDir
-                $apps.Add([pscustomobject]@{ Id = $pkgId; Name = $pkg.Name; Folder = $folderName; Type = $type })
+                $ver = Get-GwtWingetLatestVersion -Id $pkgId
+                $apps.Add([pscustomobject]@{ Id = $pkgId; Name = $pkg.Name; Folder = $folderName; Type = $type; Version = $ver })
                 $okList.Add($pkg.Name)
-                Add-GwtLog "$($pkg.Name): baixado ($($file.Name), tipo '$type')." 'Success'
+                Add-GwtLog "$($pkg.Name): baixado ($($file.Name), v$ver, tipo '$type')." 'Success'
             }
             else {
                 $failList.Add($pkg.Name)
@@ -1496,6 +1513,132 @@ function Invoke-GwtKitInstallWorker {
     catch {
         Add-GwtLog "Falha ao instalar do kit: $($_.Exception.Message)" 'Error'
         Request-GwtUi @{ Action = 'Message'; Title = 'Erro no kit offline'; Text = $_.Exception.Message; Kind = 'Error' }
+    }
+    finally {
+        $sync.Busy = $false
+        $sync.ProgressMax = [double]0
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
+function Invoke-GwtKitCheckWorker {
+    param([string]$KitDir)
+
+    try {
+        $sync.Busy = $true
+        $kitFile = Join-Path $KitDir 'kit.json'
+        if (-not (Test-Path $kitFile)) { throw "Perfil kit.json não encontrado em $KitDir." }
+        $kit = Get-Content $kitFile -Raw | ConvertFrom-Json
+        $apps = @($kit.Apps)
+        $sync.ProgressMax = [double]$apps.Count
+        $sync.ProgressValue = [double]0
+        Add-GwtLog "================ VERIFICAR ATUALIZAÇÕES DO KIT ($($apps.Count)) ================"
+
+        $updates = New-Object System.Collections.Generic.List[object]
+        $index = 0
+        foreach ($app in $apps) {
+            $index++
+            $sync.StatusText = "Verificando $($app.Name) ($index de $($apps.Count))..."
+            $current = [string]$app.Version
+            $latest = Get-GwtWingetLatestVersion -Id ([string]$app.Id)
+            if (-not $latest) {
+                Add-GwtLog "$($app.Name): não foi possível consultar a versão (pulando)." 'Warn'
+            }
+            elseif ([string]::IsNullOrWhiteSpace($current) -or ($latest -ne $current)) {
+                $fromText = if ($current) { "v$current" } else { 'versão desconhecida' }
+                Add-GwtLog "$($app.Name): ATUALIZAÇÃO — $fromText → v$latest" 'Warn'
+                $updates.Add([pscustomobject]@{ Id = [string]$app.Id; Name = [string]$app.Name; From = $current; To = $latest })
+            }
+            else {
+                Add-GwtLog "$($app.Name): já está na última (v$current)." 'Success'
+            }
+            $sync.ProgressValue = [double]$index
+        }
+
+        $sync.KitDir = $KitDir
+        $sync.KitUpdates = @($updates)
+        Add-GwtLog "Verificação concluída: $($updates.Count) com atualização de $($apps.Count)." $(if ($updates.Count -eq 0) { 'Success' } else { 'Warn' })
+        Request-GwtUi @{ Action = 'KitUpdatesFound' }
+    }
+    catch {
+        Add-GwtLog "Falha ao verificar atualizações: $($_.Exception.Message)" 'Error'
+        Request-GwtUi @{ Action = 'Message'; Title = 'Erro na verificação'; Text = $_.Exception.Message; Kind = 'Error' }
+    }
+    finally {
+        $sync.Busy = $false
+        $sync.ProgressMax = [double]0
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
+function Invoke-GwtKitUpdateWorker {
+    param([string]$KitDir, [object[]]$Updates)
+
+    try {
+        $sync.Busy = $true
+        $sync.ProgressMax = [double]$Updates.Count
+        $sync.ProgressValue = [double]0
+        Add-GwtLog "================ ATUALIZAR INSTALADORES DO KIT ($($Updates.Count)) ================"
+
+        $kitFile = Join-Path $KitDir 'kit.json'
+        $kit = Get-Content $kitFile -Raw | ConvertFrom-Json
+        $byId = @{}
+        foreach ($a in @($kit.Apps)) { $byId[[string]$a.Id] = $a }
+
+        $ok = 0; $fail = 0; $index = 0
+        foreach ($upd in $Updates) {
+            $index++
+            $id = [string]$upd.Id
+            $entry = $byId[$id]
+            if (-not $entry) { $sync.ProgressValue = [double]$index; continue }
+            $folderName = [string]$entry.Folder
+            $appDir = Join-Path $KitDir $folderName
+
+            $sync.StatusText = "Atualizando $($upd.Name) ($index de $($Updates.Count))..."
+            Add-GwtLog "▶ [$index/$($Updates.Count)] $($upd.Name): baixando v$($upd.To)..."
+
+            # Remove os instaladores antigos antes de baixar o novo (substituição limpa)
+            if (Test-Path $appDir) {
+                Get-ChildItem -LiteralPath $appDir -Recurse -Include '*.msi', '*.exe', '*.msix', '*.appx', '*.msixbundle', '*.appxbundle', '*.yaml' -ErrorAction SilentlyContinue |
+                    Remove-Item -Force -ErrorAction SilentlyContinue
+            }
+            New-Item -ItemType Directory -Path $appDir -Force | Out-Null
+
+            & winget.exe download -e --id $id --download-directory $appDir --accept-source-agreements --accept-package-agreements --disable-interactivity 2>&1 | ForEach-Object {
+                $line = ([string]$_).Trim()
+                if ($line -and $line.Length -le 220 -and $line -notmatch '^[\s\-\\|/█▒░]+$') { Add-GwtLog "    $line" }
+            }
+            $code = $LASTEXITCODE
+            $file = Get-GwtKitInstallerFile -AppDir $appDir
+
+            if ($code -eq 0 -and $file) {
+                $entry.Type = Get-GwtInstallerInType -AppDir $appDir
+                if ($entry.PSObject.Properties.Name -contains 'Version') { $entry.Version = [string]$upd.To }
+                else { Add-Member -InputObject $entry -NotePropertyName Version -NotePropertyValue ([string]$upd.To) -Force }
+                $ok++
+                Add-GwtLog "$($upd.Name): instalador substituído (agora v$($upd.To))." 'Success'
+            }
+            else {
+                $fail++
+                Add-GwtLog "$($upd.Name): falha ao baixar a nova versão (código 0x$('{0:X8}' -f $code)) — mantido o antigo." 'Error'
+            }
+            $sync.ProgressValue = [double]$index
+        }
+
+        # Regrava o kit.json com as versões atualizadas
+        [pscustomobject]@{
+            Tool      = 'GeniusWindowsToolkit'
+            CreatedAt = (Get-Date).ToString('o')
+            Apps      = @($byId.Values | Sort-Object Name)
+        } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $kitFile -Encoding UTF8
+
+        Add-GwtLog "================ ATUALIZAÇÃO: $ok substituído(s), $fail falha(s) ================" $(if ($fail -eq 0) { 'Success' } else { 'Warn' })
+        Request-GwtUi @{ Action = 'Message'; Title = 'Kit atualizado'; Kind = $(if ($fail -eq 0) { 'Info' } else { 'Warning' })
+                         Text = "Instaladores substituídos: $ok`nFalhas: $fail" }
+    }
+    catch {
+        Add-GwtLog "Falha ao atualizar o kit: $($_.Exception.Message)" 'Error'
+        Request-GwtUi @{ Action = 'Message'; Title = 'Erro ao atualizar'; Text = $_.Exception.Message; Kind = 'Error' }
     }
     finally {
         $sync.Busy = $false
@@ -3106,6 +3249,7 @@ function Invoke-GwtRunspace {
                                     <WrapPanel>
                                         <TextBlock Text="💾 Kit offline (pendrive):" Foreground="{StaticResource GoldBrush}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                         <Button Name="KitDownloadButton" Style="{StaticResource GhostButton}" Content="⬇️  Baixar instaladores dos marcados" Margin="0,0,8,0"/>
+                                        <Button Name="KitUpdateButton" Style="{StaticResource GhostButton}" Content="🔄  Verificar atualizações" Margin="0,0,8,0"/>
                                         <Button Name="KitInstallButton" Style="{StaticResource GoldButton}" Content="📥  Instalar do kit offline" Margin="0,0,8,0"/>
                                         <Button Name="KitOpenButton" Style="{StaticResource GhostButton}" Content="🗂️ Abrir pasta" Margin="0"/>
                                     </WrapPanel>
@@ -3959,6 +4103,24 @@ $sync.Controls['KitInstallButton'].Add_Click({
     } -Argument $kitDir
 })
 
+$sync.Controls['KitUpdateButton'].Add_Click({
+    if ($sync.Busy) { return }
+    if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+        [System.Windows.MessageBox]::Show($Window, 'Verificar atualizações exige o winget (e internet).', 'winget indisponível', 'OK', 'Warning') | Out-Null
+        return
+    }
+    $kitDir = Get-GwtKitDir -MustExist $true
+    if (-not $kitDir) { return }
+    if (-not (Test-Path (Join-Path $kitDir 'kit.json'))) {
+        [System.Windows.MessageBox]::Show($Window, "Nenhum kit encontrado em:`n$kitDir", 'Kit não encontrado', 'OK', 'Warning') | Out-Null
+        return
+    }
+    Invoke-GwtRunspace -ScriptBlock {
+        param($dir)
+        Invoke-GwtKitCheckWorker -KitDir $dir
+    } -Argument $kitDir
+})
+
 $sync.Controls['KitOpenButton'].Add_Click({
     $kitDir = Get-GwtKitDir
     if (-not $kitDir) { return }
@@ -4383,6 +4545,30 @@ function Invoke-PendingUiAction {
                 $sync.Controls['IsoUsbWriteButton'].IsEnabled = $true
             }
         }
+        'KitUpdatesFound' {
+            $updates = @($sync.KitUpdates)
+            if ($updates.Count -eq 0) {
+                [System.Windows.MessageBox]::Show($Window, 'Todos os instaladores do kit já estão na versão mais recente. ✔', 'Kit atualizado', 'OK', 'Information') | Out-Null
+                break
+            }
+            $lines = ($updates | Select-Object -First 20 | ForEach-Object {
+                $from = if ($_.From) { "v$($_.From)" } else { '?' }
+                "• $($_.Name):  $from → v$($_.To)"
+            }) -join "`n"
+            if ($updates.Count -gt 20) { $lines += "`n… e mais $($updates.Count - 20)." }
+            $msg = "$($updates.Count) programa(s) com atualização disponível:`n`n$lines`n`nBaixar e SUBSTITUIR os instaladores desatualizados no kit?"
+            $script:DialogOpen = $true
+            try {
+                if ([System.Windows.MessageBox]::Show($Window, $msg, 'Atualizações do kit', 'YesNo', 'Question') -eq 'Yes') {
+                    $dir = $sync.KitDir
+                    Invoke-GwtRunspace -ScriptBlock {
+                        param($arg)
+                        Invoke-GwtKitUpdateWorker -KitDir $arg.Dir -Updates $arg.Updates
+                    } -Argument @{ Dir = $dir; Updates = $updates }
+                }
+            }
+            finally { $script:DialogOpen = $false }
+        }
         'MarkInstalled' {
             $installed = $sync['DetectedInstalled']
             if (-not $installed) { return }
@@ -4410,7 +4596,7 @@ function Invoke-PendingUiAction {
 
 $ActionButtons = @('AnalyzeButton', 'MigrateButton', 'CopyOnlyButton', 'NetworkRunButton',
                    'WingetInstallButton', 'WingetUninstallButton', 'WingetUpgradeButton', 'WingetDetectButton',
-                   'KitDownloadButton', 'KitInstallButton',
+                   'KitDownloadButton', 'KitInstallButton', 'KitUpdateButton',
                    'PreferencesApplyButton', 'PrivacyApplyButton', 'DebloatRemoveButton', 'FeatureInstallButton',
                    'SystemRepairButton', 'UpdateResetButton', 'WingetFixButton', 'NtpFixButton',
                    'UpdateDefaultButton', 'UpdateSecurityButton', 'UpdateDisableButton',
