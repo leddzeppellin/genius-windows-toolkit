@@ -1,0 +1,4 @@
+# Batch precisa de CRLF; PowerShell é tratado como texto normal.
+*.bat text eol=crlf
+*.ps1 text
+*.md  text

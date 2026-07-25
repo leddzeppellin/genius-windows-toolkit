@@ -24,6 +24,22 @@ Aplicando um preset salvo (arquivo local ou URL):
 
 O link curto `bit.ly/genius-toolkit` aponta para o carregador `get.ps1`. Se preferir a URL completa, use `https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/get.ps1`.
 
+## 💾 Uso offline (pendrive)
+
+Para levar numa bancada sem internet, baixe o `.zip` da [página de releases](https://github.com/leddzeppellin/genius-windows-toolkit/releases) (ou os arquivos do repositório) e copie para o pendrive. Depois é só **dar duplo-clique**:
+
+| Arquivo | Para quê |
+|---|---|
+| **`Genius-Toolkit-Admin.bat`** | Abre já como Administrador (pede UAC). **Recomendado** — libera as abas Rede, Recursos, Windows Update e Criar ISO. |
+| `Genius-Toolkit.bat` | Abre sem elevação (migração de pastas e ajustes de usuário). |
+| `GeniusToolkit.ps1` | O app em si (os `.bat` chamam este arquivo). |
+
+Os `.bat` já cuidam do `ExecutionPolicy` — não precisa abrir o PowerShell nem digitar nada.
+
+**O que funciona 100% offline:** migração de pastas, reparo de rede, ajustes, privacidade e debloat, diagnóstico, e **modificar/gravar uma ISO** que já esteja no pendrive.
+
+**O que precisa de internet:** instalar/atualizar programas (winget baixa da rede), baixar o `oscdimg` para *exportar* a ISO (se o Windows ADK não estiver instalado) e ativar alguns recursos como o .NET 3.5. O app detecta a ausência de internet e avisa no log quais recursos ficam indisponíveis.
+
 > ℹ️ O `get.ps1` é um carregador minúsculo em ASCII puro: ele baixa o `GeniusToolkit.ps1` (UTF-8 com BOM, acentuação e ícones corretos), remove o caractere BOM que o `irm` preserva — e que quebraria o `iex` — e executa repassando seus argumentos. Para uso local, rode o `GeniusToolkit.ps1` diretamente.
 
 ## 📁 Migração de pastas do usuário

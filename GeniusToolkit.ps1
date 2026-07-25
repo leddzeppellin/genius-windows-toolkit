@@ -4234,6 +4234,23 @@ if (-not (Test-GwtAdmin)) {
     Add-GwtLog 'Migração de pastas e ajustes de usuário funcionam sem Administrador. A aba Rede exige elevação.' 'Info'
 }
 
+# Detecção rápida de internet (para avisar sobre recursos que precisam de rede).
+$sync.Online = $false
+try {
+    $req = [System.Net.WebRequest]::Create('http://www.msftconnecttest.com/connecttest.txt')
+    $req.Timeout = 1500
+    $resp = $req.GetResponse(); $resp.Close(); $sync.Online = $true
+}
+catch { $sync.Online = $false }
+
+if ($sync.Online) {
+    Add-GwtLog 'Internet detectada — todos os recursos disponíveis.' 'Success'
+}
+else {
+    Add-GwtLog 'Sem internet (modo offline). Funcionam normalmente: migração de pastas, rede, ajustes, privacidade, diagnóstico, e modificar/gravar uma ISO local.' 'Warn'
+    Add-GwtLog 'Precisam de internet: instalar/atualizar programas (winget), baixar o oscdimg para exportar ISO, e ativar alguns recursos (.NET 3.5).' 'Warn'
+}
+
 if ($Config) {
     try {
         Import-PresetFrom -Source $Config
