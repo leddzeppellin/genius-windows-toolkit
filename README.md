@@ -4,21 +4,25 @@ Utilitário PowerShell de bancada para **pós-formatação do Windows**, com int
 
 ## Execução rápida (PowerShell)
 
+Abra o PowerShell e rode:
+
 ```powershell
-irm https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/get.ps1 | iex
+irm https://bit.ly/genius-toolkit | iex
 ```
 
-Com parâmetros:
+Com parâmetros (unidade de destino, preset inicial):
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/get.ps1))) -TargetDrive D: -Preset Extended
+& ([scriptblock]::Create((irm https://bit.ly/genius-toolkit))) -TargetDrive D: -Preset Extended
 ```
 
 Aplicando um preset salvo (arquivo local ou URL):
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/get.ps1))) -Config 'C:\presets\bancada.json'
+& ([scriptblock]::Create((irm https://bit.ly/genius-toolkit))) -Config 'C:\presets\bancada.json'
 ```
+
+O link curto `bit.ly/genius-toolkit` aponta para o carregador `get.ps1`. Se preferir a URL completa, use `https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/get.ps1`.
 
 > ℹ️ O `get.ps1` é um carregador minúsculo em ASCII puro: ele baixa o `GeniusToolkit.ps1` (UTF-8 com BOM, acentuação e ícones corretos), remove o caractere BOM que o `irm` preserva — e que quebraria o `iex` — e executa repassando seus argumentos. Para uso local, rode o `GeniusToolkit.ps1` diretamente.
 
