@@ -2,7 +2,8 @@
 # Uso: powershell -File tools/test-render.ps1 [-Seconds 5] [-Shot caminho.png]
 param(
     [int]$Seconds = 5,
-    [string]$Shot = (Join-Path $PSScriptRoot 'render-test.png')
+    [string]$Shot = (Join-Path $PSScriptRoot 'render-test.png'),
+    [int]$Tab = -1
 )
 
 $toolkit = Join-Path $PSScriptRoot '..\GeniusToolkit.ps1'
@@ -15,6 +16,10 @@ $hook = @"
 `$AutoCloseTimer.Add_Tick({
     `$AutoCloseTimer.Stop()
     try {
+        if ($Tab -ge 0) { `$sync.Controls['MainTabs'].SelectedIndex = $Tab }
+        `$Window.Topmost = `$true
+        `$Window.Activate()
+        Start-Sleep -Milliseconds 400
         Add-Type -AssemblyName System.Drawing, System.Windows.Forms
         `$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
         `$bmp = New-Object System.Drawing.Bitmap `$bounds.Width, `$bounds.Height

@@ -1,5 +1,5 @@
 {
-  "Version": 1,
+  "Version": 2,
   "Tool": "GeniusWindowsToolkit",
   "SavedAt": "2026-07-21T00:00:00.0000000-03:00",
   "TargetDrive": "D:",
@@ -20,11 +20,30 @@
     "Services",
     "ResetStack"
   ],
-  "Tweaks": [
+  "Preferences": [
     "ShowExtensions",
+    "ThisPc",
     "Clipboard",
-    "ThisPc"
+    "EndTask"
   ],
+  "Privacy": [
+    "Telemetry",
+    "ActivityHistory",
+    "ConsumerFeatures",
+    "DeliveryOpt",
+    "Location"
+  ],
+  "RemoveApps": [
+    "Microsoft.WindowsFeedbackHub",
+    "Microsoft.GetHelp",
+    "Microsoft.MicrosoftOfficeHub",
+    "Microsoft.Copilot",
+    "Microsoft.BingNews",
+    "Microsoft.BingWeather",
+    "Clipchamp.Clipchamp",
+    "Microsoft.MicrosoftSolitaireCollection"
+  ],
+  "Features": [],
   "Packages": [
     "Google.Chrome",
     "7zip.7zip",

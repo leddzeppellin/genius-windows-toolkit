@@ -1,6 +1,6 @@
 # 🧞 Genius Windows Toolkit
 
-Utilitário PowerShell de bancada para **pós-formatação do Windows**, com interface gráfica moderna e arquitetura inspirada no [WinUtil do Chris Titus](https://github.com/christitustech/winutil): todas as operações pesadas rodam em *runspaces* em segundo plano — a janela nunca congela — com log em tempo real, barra de progresso real e backup antes de qualquer alteração.
+Utilitário PowerShell de bancada para **pós-formatação do Windows**, com interface gráfica moderna: todas as operações pesadas rodam em *runspaces* em segundo plano — a janela nunca congela — com log em tempo real, barra de progresso real e backup antes de qualquer alteração.
 
 ## Execução rápida (PowerShell)
 
@@ -58,9 +58,27 @@ Catálogo estilo Ninite com IDs validados e sem duplicatas: navegadores, mensage
 - Instalação silenciosa com resumo final (instalados × falhas)
 - **Atualizar tudo** (`winget upgrade --all`) em um clique
 
-## ⚙️ Ajustes do Windows
+## ⚙️ Ajustes
 
-Extensões de arquivos, arquivos ocultos, histórico da área de transferência (Win+V), Explorer em "Este Computador", modo escuro, menu de contexto clássico do Windows 11, remover Bing da busca, barra de tarefas à esquerda, botão "Finalizar tarefa" e desativar inicialização rápida — sempre com backup `.reg` antes.
+Preferências reversíveis de interface e sistema, em grade por categoria: extensões e arquivos ocultos, Explorer em "Este Computador", menu clássico do Windows 11, histórico da área de transferência (Win+V), modo escuro, barras de rolagem sempre visíveis, ajustes da barra de tarefas (alinhamento, botões, porcentagem da bateria), remover Bing da busca, ocultar "Recomendados" do Iniciar, logon verboso, BSoD detalhado, caminhos longos, pular tela de bloqueio, Num Lock ao iniciar, desativar aceleração do mouse e Teclas de Aderência, Game Mode, Outlook clássico e desativar inicialização rápida — sempre com backup `.reg` antes.
+
+## 🧹 Privacidade e limpeza
+
+Duas colunas: **tweaks** (Essenciais e Avançados) e **remoção de apps da Store**.
+
+- **Essenciais**: desativar telemetria, histórico de atividades, recursos de consumidor, Delivery Optimization, rastreamento de localização, apps em segundo plano, hibernação; remover Widgets; WPBT; bloquear apps complementares de dispositivos; serviços não essenciais para Manual; bloquear recomendações da Store na busca; limpeza de disco e arquivos temporários.
+- **Avançados (com cautela)**: debloat do Edge e do Brave, remover Edge/OneDrive, desativar e remover IA (Copilot/Recall), efeitos visuais para desempenho, Sensor de Armazenamento, notificações, Armazenamento Reservado, relógio em UTC (dual boot), remover Início e Galeria, preferir IPv4/desativar Teredo/IPv6, bloquear auto-instalação da Razer.
+- **Remover apps da Store**: Feedback Hub, Teams, Office Hub, Copilot, Bing (News/Weather/Search), Xbox, Solitaire, Clipchamp, Dev Home, Power Automate e outros — para o usuário atual e novos usuários.
+
+Botões de atalho **Só essenciais** e **Limpar**. Tudo com backup `.reg` antes.
+
+## 🧩 Recursos e correções
+
+- **Recursos do Windows**: .NET 3.5, Hyper-V, WSL, Windows Sandbox, cliente NFS, componentes de mídia legados, Telnet, backup diário do registro e recuperação por F8.
+- **Correções rápidas**: reparar sistema (DISM + SFC), resetar o Windows Update, reinstalar o winget e corrigir o relógio (NTP).
+- **DNS**: aplicar Google, Cloudflare (e variante que bloqueia malware), OpenDNS, Quad9 ou AdGuard nos adaptadores ativos — ou voltar ao automático.
+- **Plano de energia**: ativar/remover o Desempenho Máximo.
+- **Painéis clássicos**: atalhos para Painel de Controle, Gerenciador de Dispositivos, Serviços, Gerenciamento de Disco e outros.
 
 ## 🩺 Diagnóstico
 
@@ -108,7 +126,6 @@ powershell -File GeniusToolkit.ps1 -SmokeTest
 powershell -File tools/test-render.ps1
 ```
 
-## Créditos
+## Licença
 
-- Arquitetura de runspaces + presets inspirada no [WinUtil](https://github.com/christitustech/winutil) (MIT) de Chris Titus.
-- Licença: [MIT](LICENSE).
+Distribuído sob a licença [MIT](LICENSE).

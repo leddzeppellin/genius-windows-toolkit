@@ -78,6 +78,7 @@ $sync.RunspacePool   = $null
 $sync.Jobs           = [System.Collections.ArrayList]::new()
 $sync.Controls       = @{}
 $sync.Window         = $null
+$sync.OpData         = @{}   # dados de registro/serviço/ação por chave (acessível nos runspaces)
 
 New-Item -ItemType Directory -Path $sync.BackupRoot, $sync.LogRoot, $sync.ReportRoot -Force | Out-Null
 
@@ -114,17 +115,32 @@ $NetworkActions = @(
     [pscustomobject]@{ Key='Winsock';    Name='Resetar Winsock (netsh winsock reset)';     Risk='Requer reboot';   Default=$false }
 )
 
-$WindowsTweaks = @(
-    [pscustomobject]@{ Key='ShowExtensions'; Name='Mostrar extensões de arquivos';                Scope='Usuário'; Default=$true  }
-    [pscustomobject]@{ Key='ShowHidden';     Name='Mostrar arquivos ocultos';                     Scope='Usuário'; Default=$false }
-    [pscustomobject]@{ Key='Clipboard';      Name='Ativar histórico da área de transferência';    Scope='Usuário'; Default=$true  }
-    [pscustomobject]@{ Key='ThisPc';         Name='Abrir Explorer em Este Computador';            Scope='Usuário'; Default=$true  }
-    [pscustomobject]@{ Key='DarkMode';       Name='Ativar modo escuro do Windows';                Scope='Usuário'; Default=$false }
-    [pscustomobject]@{ Key='ClassicMenu';    Name='Menu de contexto clássico (Windows 11)';       Scope='Usuário'; Default=$false }
-    [pscustomobject]@{ Key='NoBingSearch';   Name='Desativar Bing na busca do menu Iniciar';      Scope='Usuário'; Default=$false }
-    [pscustomobject]@{ Key='TaskbarLeft';    Name='Alinhar barra de tarefas à esquerda (Win 11)'; Scope='Usuário'; Default=$false }
-    [pscustomobject]@{ Key='EndTask';        Name='Botão Finalizar tarefa na barra de tarefas';   Scope='Usuário'; Default=$false }
-    [pscustomobject]@{ Key='FastStartup';    Name='Desativar inicialização rápida';               Scope='Sistema'; Default=$false }
+# Preferências (aba Ajustes) — cada item aplica um valor benéfico; dados em $sync.OpData.
+$Preferences = @(
+    [pscustomobject]@{ Key='ShowExtensions';    Name='Mostrar extensões de arquivos';               Cat='Explorador';        Default=$true  }
+    [pscustomobject]@{ Key='ShowHidden';        Name='Mostrar arquivos ocultos';                    Cat='Explorador';        Default=$false }
+    [pscustomobject]@{ Key='ThisPc';            Name='Abrir Explorer em "Este Computador"';         Cat='Explorador';        Default=$true  }
+    [pscustomobject]@{ Key='ClassicMenu';       Name='Menu de contexto clássico (Windows 11)';      Cat='Explorador';        Default=$false }
+    [pscustomobject]@{ Key='Clipboard';         Name='Histórico da área de transferência (Win+V)';  Cat='Sistema';           Default=$true  }
+    [pscustomobject]@{ Key='DarkMode';          Name='Modo escuro do Windows';                      Cat='Aparência';         Default=$false }
+    [pscustomobject]@{ Key='Scrollbars';        Name='Barras de rolagem sempre visíveis';           Cat='Aparência';         Default=$false }
+    [pscustomobject]@{ Key='TaskbarLeft';       Name='Barra de tarefas à esquerda (Win 11)';        Cat='Barra de tarefas';  Default=$false }
+    [pscustomobject]@{ Key='HideTaskView';      Name='Ocultar botão "Visão de tarefas"';            Cat='Barra de tarefas';  Default=$false }
+    [pscustomobject]@{ Key='HideSearchBox';     Name='Ocultar caixa de busca da barra';             Cat='Barra de tarefas';  Default=$false }
+    [pscustomobject]@{ Key='EndTask';           Name='Botão "Finalizar tarefa" na barra';           Cat='Barra de tarefas';  Default=$false }
+    [pscustomobject]@{ Key='BatteryPercentage'; Name='Porcentagem da bateria na bandeja';           Cat='Barra de tarefas';  Default=$false }
+    [pscustomobject]@{ Key='NoBingSearch';      Name='Remover Bing da busca do Iniciar';            Cat='Iniciar e busca';   Default=$false }
+    [pscustomobject]@{ Key='StartNoRecommend';  Name='Ocultar "Recomendados" do Iniciar';           Cat='Iniciar e busca';   Default=$false }
+    [pscustomobject]@{ Key='VerboseLogon';      Name='Mensagens detalhadas no logon';               Cat='Sistema';           Default=$false }
+    [pscustomobject]@{ Key='DetailedBSoD';      Name='Tela azul (BSoD) detalhada';                  Cat='Sistema';           Default=$false }
+    [pscustomobject]@{ Key='LongPaths';         Name='Permitir caminhos longos (>260 caracteres)';  Cat='Sistema';           Default=$false }
+    [pscustomobject]@{ Key='DisableLockscreen'; Name='Pular tela de bloqueio';                      Cat='Sistema';           Default=$false }
+    [pscustomobject]@{ Key='FastStartup';       Name='Desativar inicialização rápida';              Cat='Sistema';           Default=$false }
+    [pscustomobject]@{ Key='NumLock';           Name='Num Lock ligado ao iniciar';                  Cat='Teclado e mouse';   Default=$false }
+    [pscustomobject]@{ Key='DisableMouseAccel'; Name='Desativar aceleração do mouse';               Cat='Teclado e mouse';   Default=$false }
+    [pscustomobject]@{ Key='DisableStickyKeys'; Name='Desativar Teclas de Aderência';               Cat='Teclado e mouse';   Default=$false }
+    [pscustomobject]@{ Key='GameMode';          Name='Ativar Game Mode';                            Cat='Desempenho e apps'; Default=$false }
+    [pscustomobject]@{ Key='ClassicOutlook';    Name='Forçar Outlook clássico';                     Cat='Desempenho e apps'; Default=$false }
 )
 
 # Catálogo winget curado — IDs validados, sem duplicatas nem pacotes mortos.
@@ -245,6 +261,264 @@ foreach ($pkg in $Packages) {
     $arch = if ($pkg.PSObject.Properties.Name -contains 'Arch') { $pkg.Arch } else { $null }
     $key = if ($arch) { "$($pkg.Id)#$arch" } else { $pkg.Id }
     Add-Member -InputObject $pkg -NotePropertyName Key -NotePropertyValue $key -Force
+}
+
+# --- Privacidade e limpeza (aba Privacidade) ---
+$PrivacyTweaks = @(
+    [pscustomobject]@{ Key='Telemetry';        Name='Desativar telemetria da Microsoft';                 Cat='Essencial'; Default=$true  }
+    [pscustomobject]@{ Key='ActivityHistory';  Name='Desativar histórico de atividades';                 Cat='Essencial'; Default=$true  }
+    [pscustomobject]@{ Key='ConsumerFeatures'; Name='Desativar recursos de consumidor (sugestões)';      Cat='Essencial'; Default=$true  }
+    [pscustomobject]@{ Key='DeliveryOpt';      Name='Desativar Delivery Optimization';                   Cat='Essencial'; Default=$true  }
+    [pscustomobject]@{ Key='Location';         Name='Desativar rastreamento de localização';             Cat='Essencial'; Default=$true  }
+    [pscustomobject]@{ Key='BackgroundApps';   Name='Desativar apps em segundo plano';                   Cat='Essencial'; Default=$false }
+    [pscustomobject]@{ Key='Hibernation';      Name='Desativar hibernação (libera espaço)';              Cat='Essencial'; Default=$false }
+    [pscustomobject]@{ Key='Widgets';          Name='Remover Widgets da barra de tarefas';               Cat='Essencial'; Default=$false }
+    [pscustomobject]@{ Key='WPBT';             Name='Desativar WPBT (segurança de firmware)';            Cat='Essencial'; Default=$false }
+    [pscustomobject]@{ Key='DeviceCompanion';  Name='Bloquear apps complementares de dispositivos';      Cat='Essencial'; Default=$false }
+    [pscustomobject]@{ Key='ServicesManual';   Name='Serviços não essenciais para Manual';               Cat='Essencial'; Default=$false }
+    [pscustomobject]@{ Key='StoreSearch';      Name='Bloquear recomendações da Store na busca';          Cat='Essencial'; Default=$false }
+    [pscustomobject]@{ Key='ExplorerDiscovery';Name='Desativar descoberta automática de pastas';         Cat='Essencial'; Default=$false }
+    [pscustomobject]@{ Key='DiskCleanup';      Name='Executar Limpeza de Disco';                         Cat='Essencial'; Default=$false }
+    [pscustomobject]@{ Key='DeleteTemp';       Name='Apagar arquivos temporários';                       Cat='Essencial'; Default=$false }
+
+    [pscustomobject]@{ Key='EdgeDebloat';      Name='Debloat do Microsoft Edge';                         Cat='Avançado (cuidado)'; Default=$false }
+    [pscustomobject]@{ Key='RemoveEdge';       Name='Remover Microsoft Edge';                            Cat='Avançado (cuidado)'; Default=$false }
+    [pscustomobject]@{ Key='RemoveOneDrive';   Name='Remover OneDrive';                                  Cat='Avançado (cuidado)'; Default=$false }
+    [pscustomobject]@{ Key='WindowsAI';        Name='Desativar e remover IA (Copilot/Recall)';           Cat='Avançado (cuidado)'; Default=$false }
+    [pscustomobject]@{ Key='VisualEffects';    Name='Efeitos visuais para melhor desempenho';            Cat='Avançado (cuidado)'; Default=$false }
+    [pscustomobject]@{ Key='StorageSense';     Name='Desativar Sensor de Armazenamento';                 Cat='Avançado (cuidado)'; Default=$false }
+    [pscustomobject]@{ Key='Notifications';    Name='Desativar notificações e calendário da bandeja';    Cat='Avançado (cuidado)'; Default=$false }
+    [pscustomobject]@{ Key='ReservedStorage';  Name='Desativar Armazenamento Reservado';                 Cat='Avançado (cuidado)'; Default=$false }
+    [pscustomobject]@{ Key='UTCTime';          Name='Relógio em UTC (dual boot com Linux)';              Cat='Avançado (cuidado)'; Default=$false }
+    [pscustomobject]@{ Key='HomeGallery';      Name='Remover Início e Galeria do Explorer';              Cat='Avançado (cuidado)'; Default=$false }
+    [pscustomobject]@{ Key='IPv4Preferred';    Name='Preferir IPv4 sobre IPv6';                          Cat='Avançado (cuidado)'; Default=$false }
+    [pscustomobject]@{ Key='Teredo';           Name='Desativar Teredo';                                  Cat='Avançado (cuidado)'; Default=$false }
+    [pscustomobject]@{ Key='DisableIPv6';      Name='Desativar IPv6 completamente';                      Cat='Avançado (cuidado)'; Default=$false }
+    [pscustomobject]@{ Key='RazerBlock';       Name='Bloquear auto-instalação de software Razer';        Cat='Avançado (cuidado)'; Default=$false }
+    [pscustomobject]@{ Key='BraveDebloat';     Name='Debloat do navegador Brave';                        Cat='Avançado (cuidado)'; Default=$false }
+)
+
+# --- Apps da Store para remoção (aba Privacidade, coluna direita) ---
+$AppxDebloat = @(
+    [pscustomobject]@{ Id='Microsoft.WindowsFeedbackHub';          Name='Feedback Hub';            Cat='Apps da Microsoft'; Default=$true  }
+    [pscustomobject]@{ Id='Microsoft.GetHelp';                     Name='Obter Ajuda';             Cat='Apps da Microsoft'; Default=$true  }
+    [pscustomobject]@{ Id='Microsoft.OutlookForWindows';           Name='Outlook (novo)';          Cat='Apps da Microsoft'; Default=$false }
+    [pscustomobject]@{ Id='MSTeams';                               Name='Microsoft Teams';         Cat='Apps da Microsoft'; Default=$false }
+    [pscustomobject]@{ Id='Microsoft.MicrosoftOfficeHub';          Name='Microsoft 365 (Office Hub)'; Cat='Apps da Microsoft'; Default=$true }
+    [pscustomobject]@{ Id='MicrosoftCorporationII.QuickAssist';    Name='Assistência Rápida';      Cat='Apps da Microsoft'; Default=$false }
+    [pscustomobject]@{ Id='Microsoft.Todos';                       Name='Microsoft To Do';         Cat='Apps da Microsoft'; Default=$false }
+    [pscustomobject]@{ Id='Microsoft.PowerAutomateDesktop';        Name='Power Automate';          Cat='Apps da Microsoft'; Default=$true  }
+    [pscustomobject]@{ Id='Microsoft.Windows.DevHome';             Name='Dev Home';                Cat='Apps da Microsoft'; Default=$true  }
+    [pscustomobject]@{ Id='Microsoft.MicrosoftStickyNotes';        Name='Notas Autoadesivas';      Cat='Apps da Microsoft'; Default=$false }
+    [pscustomobject]@{ Id='Microsoft.WindowsSoundRecorder';        Name='Gravador de Som';         Cat='Apps da Microsoft'; Default=$false }
+    [pscustomobject]@{ Id='Microsoft.WindowsAlarms';               Name='Relógio e Alarmes';       Cat='Apps da Microsoft'; Default=$false }
+    [pscustomobject]@{ Id='Microsoft.WindowsCamera';               Name='Câmera';                  Cat='Apps da Microsoft'; Default=$false }
+    [pscustomobject]@{ Id='Clipchamp.Clipchamp';                   Name='Clipchamp';               Cat='Apps da Microsoft'; Default=$true  }
+    [pscustomobject]@{ Id='Microsoft.ZuneMusic';                   Name='Media Player';            Cat='Apps da Microsoft'; Default=$false }
+
+    [pscustomobject]@{ Id='Microsoft.BingSearch';                  Name='Bing na busca';           Cat='Bing e Web';        Default=$false }
+    [pscustomobject]@{ Id='Microsoft.BingNews';                    Name='Notícias';                Cat='Bing e Web';        Default=$true  }
+    [pscustomobject]@{ Id='Microsoft.BingWeather';                 Name='Clima';                   Cat='Bing e Web';        Default=$true  }
+    [pscustomobject]@{ Id='Microsoft.Copilot';                     Name='Copilot';                 Cat='Bing e Web';        Default=$true  }
+    [pscustomobject]@{ Id='Microsoft.StartExperiencesApp';         Name='Widgets (feed)';          Cat='Bing e Web';        Default=$true  }
+
+    [pscustomobject]@{ Id='Microsoft.YourPhone';                   Name='Vincular ao Celular';     Cat='Ecossistema';       Default=$false }
+    [pscustomobject]@{ Id='MicrosoftWindows.CrossDevice';          Name='Dispositivos Móveis';     Cat='Ecossistema';       Default=$false }
+
+    [pscustomobject]@{ Id='Microsoft.GamingApp';                   Name='Xbox App';                Cat='Xbox e Jogos';      Default=$false }
+    [pscustomobject]@{ Id='Microsoft.XboxGamingOverlay';           Name='Xbox Game Bar';           Cat='Xbox e Jogos';      Default=$false }
+    [pscustomobject]@{ Id='Microsoft.XboxSpeechToTextOverlay';     Name='Xbox Voz para Texto';     Cat='Xbox e Jogos';      Default=$false }
+    [pscustomobject]@{ Id='Microsoft.MicrosoftSolitaireCollection';Name='Coleção Solitaire';       Cat='Xbox e Jogos';      Default=$true  }
+)
+
+# --- Recursos opcionais do Windows (aba Recursos) ---
+$WinFeatures = @(
+    [pscustomobject]@{ Key='dotnet35';   Name='.NET Framework 3.5 (2.0/3.0)';               Features=@('NetFx3'); Default=$false }
+    [pscustomobject]@{ Key='HyperV';     Name='Hyper-V (virtualização Microsoft)';          Features=@('Microsoft-Hyper-V-All'); Default=$false }
+    [pscustomobject]@{ Key='WSL';        Name='Subsistema Linux (WSL)';                     Features=@('VirtualMachinePlatform','Microsoft-Windows-Subsystem-Linux'); Default=$false }
+    [pscustomobject]@{ Key='Sandbox';    Name='Windows Sandbox';                            Features=@('Containers-DisposableClientVM'); Default=$false }
+    [pscustomobject]@{ Key='NFS';        Name='Cliente NFS (Network File System)';          Features=@('ServicesForNFS-ClientOnly','ClientForNFS-Infrastructure','NFS-Administration'); Special='NFS'; Default=$false }
+    [pscustomobject]@{ Key='LegacyMedia';Name='Componentes de mídia legados (WMP/DirectPlay)'; Features=@('WindowsMediaPlayer','MediaPlayback','DirectPlay','LegacyComponents'); Default=$false }
+    [pscustomobject]@{ Key='TelnetClient';Name='Cliente Telnet';                            Features=@('TelnetClient'); Default=$false }
+    [pscustomobject]@{ Key='RegBackup';  Name='Backup diário do registro (00:30)';          Features=@(); Special='RegBackup'; Default=$false }
+    [pscustomobject]@{ Key='LegacyF8';   Name='Recuperação por F8 (menu de boot legado)';   Features=@(); Special='LegacyF8'; Default=$false }
+)
+
+# --- Painéis clássicos do Windows (aba Recursos) ---
+$LegacyPanels = @(
+    [pscustomobject]@{ Name='Painel de Controle';          Cmd='control' }
+    [pscustomobject]@{ Name='Programas e Recursos';        Cmd='appwiz.cpl' }
+    [pscustomobject]@{ Name='Gerenciamento do Computador'; Cmd='compmgmt.msc' }
+    [pscustomobject]@{ Name='Gerenciador de Dispositivos'; Cmd='devmgmt.msc' }
+    [pscustomobject]@{ Name='Gerenciamento de Disco';      Cmd='diskmgmt.msc' }
+    [pscustomobject]@{ Name='Serviços';                    Cmd='services.msc' }
+    [pscustomobject]@{ Name='Opções de Energia';           Cmd='powercfg.cpl' }
+    [pscustomobject]@{ Name='Som';                         Cmd='mmsys.cpl' }
+    [pscustomobject]@{ Name='Conexões de Rede';            Cmd='ncpa.cpl' }
+    [pscustomobject]@{ Name='Propriedades do Sistema';     Cmd='sysdm.cpl' }
+    [pscustomobject]@{ Name='Firewall do Windows';         Cmd='firewall.cpl' }
+    [pscustomobject]@{ Name='Restauração do Sistema';      Cmd='rstrui.exe' }
+    [pscustomobject]@{ Name='Data e Hora';                 Cmd='timedate.cpl' }
+    [pscustomobject]@{ Name='Região';                      Cmd='intl.cpl' }
+)
+
+# --- Servidores DNS (aba Recursos) ---
+$DnsProviders = [ordered]@{
+    'Padrão (automático/DHCP)'        = $null
+    'Google'                          = @{ V4=@('8.8.8.8','8.8.4.4');             V6=@('2001:4860:4860::8888','2001:4860:4860::8844') }
+    'Cloudflare'                      = @{ V4=@('1.1.1.1','1.0.0.1');             V6=@('2606:4700:4700::1111','2606:4700:4700::1001') }
+    'Cloudflare (bloqueia malware)'   = @{ V4=@('1.1.1.2','1.0.0.2');             V6=@('2606:4700:4700::1112','2606:4700:4700::1002') }
+    'OpenDNS'                         = @{ V4=@('208.67.222.222','208.67.220.220'); V6=@('2620:119:35::35','2620:119:53::53') }
+    'Quad9'                           = @{ V4=@('9.9.9.9','149.112.112.112');     V6=@('2620:fe::fe','2620:fe::9') }
+    'AdGuard (bloqueia anúncios)'     = @{ V4=@('94.140.14.14','94.140.15.15');   V6=@('2a10:50c0::ad1:ff','2a10:50c0::ad2:ff') }
+}
+
+# ---------------------------------------------------------------------------
+# Construção de $sync.OpData — mapa chave -> operações (registro/serviço/ação).
+# Acessível por referência dentro dos runspaces (via $sync).
+# Cada entrada: @{ Reg=@(@{P;N;V;T}); Svc=@(@{N;S}); Special='Nome'; Explorer=$true }
+# ---------------------------------------------------------------------------
+$adv = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
+$sync.OpData = @{
+    # Preferências
+    'ShowExtensions'    = @{ Reg=@(@{P=$adv; N='HideFileExt'; V=0; T='DWord'}); Explorer=$true }
+    'ShowHidden'        = @{ Reg=@(@{P=$adv; N='Hidden'; V=1; T='DWord'}); Explorer=$true }
+    'ThisPc'            = @{ Reg=@(@{P=$adv; N='LaunchTo'; V=1; T='DWord'}); Explorer=$true }
+    'ClassicMenu'       = @{ Special='ClassicMenu'; Explorer=$true }
+    'Clipboard'         = @{ Reg=@(@{P='HKCU:\Software\Microsoft\Clipboard'; N='EnableClipboardHistory'; V=1; T='DWord'}) }
+    'DarkMode'          = @{ Reg=@(
+                                @{P='HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'; N='AppsUseLightTheme'; V=0; T='DWord'},
+                                @{P='HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'; N='SystemUsesLightTheme'; V=0; T='DWord'}
+                            ); Explorer=$true }
+    'Scrollbars'        = @{ Reg=@(@{P='HKCU:\Control Panel\Accessibility'; N='DynamicScrollbars'; V=0; T='DWord'}) }
+    'TaskbarLeft'       = @{ Reg=@(@{P=$adv; N='TaskbarAl'; V=0; T='DWord'}); Explorer=$true }
+    'HideTaskView'      = @{ Reg=@(@{P=$adv; N='ShowTaskViewButton'; V=0; T='DWord'}); Explorer=$true }
+    'HideSearchBox'     = @{ Reg=@(@{P='HKCU:\Software\Microsoft\Windows\CurrentVersion\Search'; N='SearchboxTaskbarMode'; V=0; T='DWord'}); Explorer=$true }
+    'EndTask'           = @{ Reg=@(@{P="$adv\TaskbarDeveloperSettings"; N='TaskbarEndTask'; V=1; T='DWord'}) }
+    'BatteryPercentage' = @{ Reg=@(@{P=$adv; N='IsBatteryPercentageEnabled'; V=1; T='DWord'}) }
+    'NoBingSearch'      = @{ Reg=@(
+                                @{P='HKCU:\Software\Microsoft\Windows\CurrentVersion\Search'; N='BingSearchEnabled'; V=0; T='DWord'},
+                                @{P='HKCU:\Software\Policies\Microsoft\Windows\Explorer'; N='DisableSearchBoxSuggestions'; V=1; T='DWord'}
+                            ) }
+    'StartNoRecommend'  = @{ Reg=@(
+                                @{P='HKLM:\SOFTWARE\Microsoft\PolicyManager\current\device\Start'; N='HideRecommendedSection'; V=1; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer'; N='HideRecommendedSection'; V=1; T='DWord'}
+                            ); Explorer=$true }
+    'VerboseLogon'      = @{ Reg=@(@{P='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'; N='VerboseStatus'; V=1; T='DWord'}) }
+    'DetailedBSoD'      = @{ Reg=@(
+                                @{P='HKLM:\SYSTEM\CurrentControlSet\Control\CrashControl'; N='DisplayParameters'; V=1; T='DWord'},
+                                @{P='HKLM:\SYSTEM\CurrentControlSet\Control\CrashControl'; N='DisableEmoticon'; V=1; T='DWord'}
+                            ) }
+    'LongPaths'         = @{ Reg=@(@{P='HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem'; N='LongPathsEnabled'; V=1; T='DWord'}) }
+    'DisableLockscreen' = @{ Reg=@(@{P='HKLM:\SOFTWARE\Policies\Microsoft\Windows\Personalization'; N='NoLockScreen'; V=1; T='DWord'}) }
+    'FastStartup'       = @{ Reg=@(@{P='HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power'; N='HiberbootEnabled'; V=0; T='DWord'}) }
+    'NumLock'           = @{ Reg=@(@{P='HKCU:\Control Panel\Keyboard'; N='InitialKeyboardIndicators'; V='2'; T='String'}) }
+    'DisableMouseAccel' = @{ Reg=@(
+                                @{P='HKCU:\Control Panel\Mouse'; N='MouseSpeed'; V='0'; T='String'},
+                                @{P='HKCU:\Control Panel\Mouse'; N='MouseThreshold1'; V='0'; T='String'},
+                                @{P='HKCU:\Control Panel\Mouse'; N='MouseThreshold2'; V='0'; T='String'}
+                            ) }
+    'DisableStickyKeys' = @{ Reg=@(@{P='HKCU:\Control Panel\Accessibility\StickyKeys'; N='Flags'; V='506'; T='String'}) }
+    'GameMode'          = @{ Reg=@(
+                                @{P='HKCU:\Software\Microsoft\GameBar'; N='AllowAutoGameMode'; V=1; T='DWord'},
+                                @{P='HKCU:\Software\Microsoft\GameBar'; N='AutoGameModeEnabled'; V=1; T='DWord'}
+                            ) }
+    'ClassicOutlook'    = @{ Reg=@(@{P='HKCU:\SOFTWARE\Microsoft\Office\16.0\Outlook\Preferences'; N='UseNewOutlook'; V=0; T='DWord'}) }
+
+    # Privacidade — essenciais
+    'Telemetry'         = @{ Special='TelemetryExtra'; Reg=@(
+                                @{P='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection'; N='AllowTelemetry'; V=0; T='DWord'},
+                                @{P='HKCU:\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo'; N='Enabled'; V=0; T='DWord'},
+                                @{P='HKCU:\Software\Microsoft\Windows\CurrentVersion\Privacy'; N='TailoredExperiencesWithDiagnosticDataEnabled'; V=0; T='DWord'},
+                                @{P='HKCU:\Software\Microsoft\Speech_OneCore\Settings\OnlineSpeechPrivacy'; N='HasAccepted'; V=0; T='DWord'},
+                                @{P='HKCU:\Software\Microsoft\Input\TIPC'; N='Enabled'; V=0; T='DWord'},
+                                @{P='HKCU:\Software\Microsoft\InputPersonalization'; N='RestrictImplicitInkCollection'; V=1; T='DWord'},
+                                @{P='HKCU:\Software\Microsoft\InputPersonalization'; N='RestrictImplicitTextCollection'; V=1; T='DWord'},
+                                @{P='HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; N='Start_TrackProgs'; V=0; T='DWord'}
+                            ) }
+    'ActivityHistory'   = @{ Reg=@(
+                                @{P='HKLM:\SOFTWARE\Policies\Microsoft\Windows\System'; N='EnableActivityFeed'; V=0; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\Microsoft\Windows\System'; N='PublishUserActivities'; V=0; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\Microsoft\Windows\System'; N='UploadUserActivities'; V=0; T='DWord'}
+                            ) }
+    'ConsumerFeatures'  = @{ Reg=@(@{P='HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent'; N='DisableWindowsConsumerFeatures'; V=1; T='DWord'}) }
+    'DeliveryOpt'       = @{ Reg=@(@{P='HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization'; N='DODownloadMode'; V=0; T='DWord'}) }
+    'Location'          = @{ Svc=@(@{N='lfsvc'; S='Disabled'}); Reg=@(
+                                @{P='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location'; N='Value'; V='Deny'; T='String'},
+                                @{P='HKLM:\SYSTEM\Maps'; N='AutoUpdateEnabled'; V=0; T='DWord'}
+                            ) }
+    'BackgroundApps'    = @{ Reg=@(@{P='HKCU:\Software\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications'; N='GlobalUserDisabled'; V=1; T='DWord'}) }
+    'Hibernation'       = @{ Special='HiberOff'; Reg=@(@{P='HKLM:\System\CurrentControlSet\Control\Session Manager\Power'; N='HibernateEnabled'; V=0; T='DWord'}) }
+    'Widgets'           = @{ Special='RemoveWidgets' }
+    'WPBT'              = @{ Reg=@(@{P='HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager'; N='DisableWpbtExecution'; V=1; T='DWord'}) }
+    'DeviceCompanion'   = @{ Reg=@(@{P='HKLM:\SOFTWARE\Policies\Microsoft\Windows\Device Metadata'; N='PreventDeviceMetadataFromNetwork'; V=1; T='DWord'}) }
+    'ServicesManual'    = @{ Special='SvcHostSplit'; Svc=@(
+                                @{N='DiagTrack'; S='Disabled'}, @{N='MapsBroker'; S='Manual'},
+                                @{N='StorSvc'; S='Manual'}, @{N='SharedAccess'; S='Disabled'}
+                            ) }
+    'StoreSearch'       = @{ Special='StoreSearchBlock' }
+    'ExplorerDiscovery' = @{ Special='ExplorerDiscovery' }
+    'DiskCleanup'       = @{ Special='DiskCleanup' }
+    'DeleteTemp'        = @{ Special='DeleteTemp' }
+
+    # Privacidade — avançados
+    'EdgeDebloat'       = @{ Reg=@(
+                                @{P='HKLM:\SOFTWARE\Policies\Microsoft\Edge'; N='PersonalizationReportingEnabled'; V=0; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\Microsoft\Edge'; N='ShowRecommendationsEnabled'; V=0; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\Microsoft\Edge'; N='HideFirstRunExperience'; V=1; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\Microsoft\Edge'; N='UserFeedbackAllowed'; V=0; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\Microsoft\Edge'; N='EdgeCollectionsEnabled'; V=0; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\Microsoft\Edge'; N='EdgeShoppingAssistantEnabled'; V=0; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\Microsoft\Edge'; N='ShowMicrosoftRewards'; V=0; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\Microsoft\Edge'; N='WebWidgetAllowed'; V=0; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\Microsoft\Edge'; N='DiagnosticData'; V=0; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\Microsoft\Edge'; N='DefaultBrowserSettingsCampaignEnabled'; V=0; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate'; N='CreateDesktopShortcutDefault'; V=0; T='DWord'}
+                            ) }
+    'RemoveEdge'        = @{ Special='RemoveEdge' }
+    'RemoveOneDrive'    = @{ Special='RemoveOneDrive' }
+    'WindowsAI'         = @{ Special='WindowsAI'; Reg=@(
+                                @{P='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'; N='SettingsPageVisibility'; V='hide:aicomponents'; T='String'},
+                                @{P='HKLM:\SOFTWARE\Policies\WindowsNotepad'; N='DisableAIFeatures'; V=1; T='DWord'}
+                            ) }
+    'VisualEffects'     = @{ Special='VisualFxMask'; Reg=@(
+                                @{P='HKCU:\Control Panel\Desktop'; N='DragFullWindows'; V='0'; T='String'},
+                                @{P='HKCU:\Control Panel\Desktop\WindowMetrics'; N='MinAnimate'; V='0'; T='String'},
+                                @{P="$adv"; N='ListviewAlphaSelect'; V=0; T='DWord'},
+                                @{P="$adv"; N='ListviewShadow'; V=0; T='DWord'},
+                                @{P="$adv"; N='TaskbarAnimations'; V=0; T='DWord'},
+                                @{P='HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects'; N='VisualFXSetting'; V=3; T='DWord'},
+                                @{P='HKCU:\Software\Microsoft\Windows\DWM'; N='EnableAeroPeek'; V=0; T='DWord'}
+                            ) }
+    'StorageSense'      = @{ Reg=@(@{P='HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy'; N='01'; V=0; T='DWord'}) }
+    'Notifications'     = @{ Reg=@(
+                                @{P='HKCU:\Software\Policies\Microsoft\Windows\Explorer'; N='DisableNotificationCenter'; V=1; T='DWord'},
+                                @{P='HKCU:\Software\Microsoft\Windows\CurrentVersion\PushNotifications'; N='ToastEnabled'; V=0; T='DWord'}
+                            ) }
+    'ReservedStorage'   = @{ Special='ReservedStorage' }
+    'UTCTime'           = @{ Reg=@(@{P='HKLM:\SYSTEM\CurrentControlSet\Control\TimeZoneInformation'; N='RealTimeIsUniversal'; V=1; T='QWord'}) }
+    'HomeGallery'       = @{ Reg=@(
+                                @{P='HKCU:\Software\Classes\CLSID\{f874310e-b6b7-47dc-bc84-b9e6b38f5903}'; N='System.IsPinnedToNameSpaceTree'; V=0; T='DWord'},
+                                @{P='HKCU:\Software\Classes\CLSID\{e88865ea-0e1c-4e20-9aa6-edcd0212c87c}'; N='System.IsPinnedToNameSpaceTree'; V=0; T='DWord'},
+                                @{P="$adv"; N='LaunchTo'; V=1; T='DWord'}
+                            ); Explorer=$true }
+    'IPv4Preferred'     = @{ Reg=@(@{P='HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters'; N='DisabledComponents'; V=32; T='DWord'}) }
+    'Teredo'            = @{ Special='Teredo' }
+    'DisableIPv6'       = @{ Special='DisableIPv6'; Reg=@(@{P='HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters'; N='DisabledComponents'; V=255; T='DWord'}) }
+    'RazerBlock'        = @{ Special='RazerBlock'; Reg=@(
+                                @{P='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\DriverSearching'; N='SearchOrderConfig'; V=0; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Device Installer'; N='DisableCoInstallers'; V=1; T='DWord'}
+                            ) }
+    'BraveDebloat'      = @{ Reg=@(
+                                @{P='HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'; N='BraveRewardsDisabled'; V=1; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'; N='BraveWalletDisabled'; V=1; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'; N='BraveVPNDisabled'; V=1; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'; N='BraveAIChatEnabled'; V=0; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'; N='BraveNewsDisabled'; V=1; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'; N='BraveTalkDisabled'; V=1; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'; N='TorDisabled'; V=1; T='DWord'},
+                                @{P='HKLM:\SOFTWARE\Policies\BraveSoftware\Brave'; N='BraveP3AEnabled'; V=0; T='DWord'}
+                            ) }
 }
 
 #endregion
@@ -866,97 +1140,375 @@ function Invoke-GwtWingetUpgradeWorker {
     }
 }
 
-function Invoke-GwtTweak {
-    param([string]$Key)
+# ---- Aplicadores genéricos (usados por Ajustes e Privacidade) ----
 
-    switch ($Key) {
-        'ShowExtensions' {
-            New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'HideFileExt' -PropertyType DWord -Value 0 -Force | Out-Null
-            Add-GwtLog 'Extensões de arquivos visíveis.' 'Success'
-        }
-        'ShowHidden' {
-            New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'Hidden' -PropertyType DWord -Value 1 -Force | Out-Null
-            Add-GwtLog 'Arquivos ocultos visíveis.' 'Success'
-        }
-        'Clipboard' {
-            New-Item -Path 'HKCU:\Software\Microsoft\Clipboard' -Force | Out-Null
-            New-ItemProperty -Path 'HKCU:\Software\Microsoft\Clipboard' -Name 'EnableClipboardHistory' -PropertyType DWord -Value 1 -Force | Out-Null
-            Add-GwtLog 'Histórico da área de transferência ativado (Win+V).' 'Success'
-        }
-        'ThisPc' {
-            New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'LaunchTo' -PropertyType DWord -Value 1 -Force | Out-Null
-            Add-GwtLog 'Explorer abrirá em Este Computador.' 'Success'
-        }
-        'DarkMode' {
-            $themePath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
-            New-Item -Path $themePath -Force | Out-Null
-            New-ItemProperty -Path $themePath -Name 'AppsUseLightTheme' -PropertyType DWord -Value 0 -Force | Out-Null
-            New-ItemProperty -Path $themePath -Name 'SystemUsesLightTheme' -PropertyType DWord -Value 0 -Force | Out-Null
-            Add-GwtLog 'Modo escuro ativado.' 'Success'
-        }
+function Set-GwtRegistryEntry {
+    param([string]$Path, [string]$Name, $Value, [string]$Type)
+
+    if (-not (Test-Path -LiteralPath $Path)) { New-Item -Path $Path -Force | Out-Null }
+    $data = switch ($Type) {
+        'Binary' { [byte[]]$Value }
+        'QWord'  { [int64]$Value }
+        'DWord'  { [int32]$Value }
+        default  { [string]$Value }
+    }
+    New-ItemProperty -Path $Path -Name $Name -Value $data -PropertyType $Type -Force | Out-Null
+}
+
+function Set-GwtServiceStartup {
+    param([string]$Name, [string]$Startup)
+    $normalized = switch ($Startup) {
+        'Disable'   { 'Disabled' }
+        'Disabled'  { 'Disabled' }
+        'Manual'    { 'Manual' }
+        default     { 'Automatic' }
+    }
+    Set-Service -Name $Name -StartupType $normalized -ErrorAction Stop
+}
+
+function Invoke-GwtOpSpecial {
+    param([string]$Special)
+
+    switch ($Special) {
         'ClassicMenu' {
             $clsid = 'HKCU:\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32'
             New-Item -Path $clsid -Force | Out-Null
             Set-ItemProperty -Path $clsid -Name '(Default)' -Value '' | Out-Null
-            Add-GwtLog 'Menu de contexto clássico habilitado (Windows 11).' 'Success'
         }
-        'NoBingSearch' {
-            $polPath = 'HKCU:\Software\Policies\Microsoft\Windows\Explorer'
-            New-Item -Path $polPath -Force | Out-Null
-            New-ItemProperty -Path $polPath -Name 'DisableSearchBoxSuggestions' -PropertyType DWord -Value 1 -Force | Out-Null
-            Add-GwtLog 'Bing removido da busca do menu Iniciar.' 'Success'
+        'TelemetryExtra' {
+            try { Set-MpPreference -SubmitSamplesConsent 2 -ErrorAction Stop } catch { }
+            foreach ($svc in 'DiagTrack', 'dmwappushservice') {
+                try { Set-Service -Name $svc -StartupType Disabled -ErrorAction Stop } catch { }
+            }
+            [Environment]::SetEnvironmentVariable('POWERSHELL_TELEMETRY_OPTOUT', '1', 'Machine')
         }
-        'TaskbarLeft' {
-            New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'TaskbarAl' -PropertyType DWord -Value 0 -Force | Out-Null
-            Add-GwtLog 'Barra de tarefas alinhada à esquerda.' 'Success'
+        'HiberOff'   { & powercfg.exe /hibernate off | Out-Null }
+        'RemoveWidgets' {
+            Get-Process *Widget* -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Get-AppxPackage 'Microsoft.WidgetsPlatformRuntime' -AllUsers -ErrorAction SilentlyContinue | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue
+            Get-AppxPackage 'MicrosoftWindows.Client.WebExperience' -AllUsers -ErrorAction SilentlyContinue | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue
         }
-        'EndTask' {
-            $devPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced\TaskbarDeveloperSettings'
-            New-Item -Path $devPath -Force | Out-Null
-            New-ItemProperty -Path $devPath -Name 'TaskbarEndTask' -PropertyType DWord -Value 1 -Force | Out-Null
-            Add-GwtLog 'Botão Finalizar tarefa habilitado.' 'Success'
+        'SvcHostSplit' {
+            $memKb = (Get-CimInstance Win32_PhysicalMemory | Measure-Object Capacity -Sum).Sum / 1KB
+            Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control' -Name 'SvcHostSplitThresholdInKB' -Value ([int64]$memKb) -Force
         }
-        'FastStartup' {
-            if (-not (Test-GwtAdmin)) { throw 'Desativar inicialização rápida exige Administrador.' }
-            New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' -Name 'HiberbootEnabled' -PropertyType DWord -Value 0 -Force | Out-Null
-            Add-GwtLog 'Inicialização rápida desativada.' 'Success'
+        'StoreSearchBlock' {
+            $db = "$env:LocalAppData\Packages\Microsoft.WindowsStore_8wekyb3d8bbwe\LocalState\store.db"
+            if (Test-Path -LiteralPath $db) { & icacls.exe $db /deny 'Everyone:F' | Out-Null }
+        }
+        'ExplorerDiscovery' {
+            foreach ($p in @(
+                'HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\Bags',
+                'HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\BagMRU'
+            )) { if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue } }
+            $allFolders = 'HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\Bags\AllFolders\Shell'
+            New-Item -Path $allFolders -Force | Out-Null
+            New-ItemProperty -Path $allFolders -Name 'FolderType' -Value 'NotSpecified' -PropertyType String -Force | Out-Null
+        }
+        'DiskCleanup' {
+            & cleanmgr.exe /d $env:SystemDrive /VERYLOWDISK | Out-Null
+            & Dism.exe /online /Cleanup-Image /StartComponentCleanup /ResetBase | Out-Null
+        }
+        'DeleteTemp' {
+            Remove-Item -Path "$env:Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path "$env:SystemRoot\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        'RemoveEdge' {
+            $setup = Resolve-Path -Path "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\*\Installer\setup.exe" -ErrorAction SilentlyContinue | Select-Object -Last 1
+            if ($setup) {
+                New-Item -Path "$env:SystemRoot\SystemApps\Microsoft.MicrosoftEdge_8wekyb3d8bbwe\MicrosoftEdge.exe" -Force -ErrorAction SilentlyContinue | Out-Null
+                Start-Process -FilePath $setup.Path -ArgumentList '--uninstall --system-level --force-uninstall --delete-profile' -Wait
+            } else { Add-GwtLog 'Microsoft Edge não encontrado.' 'Warn' }
+        }
+        'RemoveOneDrive' {
+            $setup = "$env:SystemRoot\System32\OneDriveSetup.exe"
+            if (-not (Test-Path $setup)) { $setup = "$env:SystemRoot\SysWOW64\OneDriveSetup.exe" }
+            if (Test-Path $setup) {
+                Start-Process -FilePath $setup -ArgumentList '/uninstall' -Wait
+                Set-Service -Name OneSyncSvc -StartupType Disabled -ErrorAction SilentlyContinue
+            } else { Add-GwtLog 'Instalador do OneDrive não encontrado.' 'Warn' }
+        }
+        'WindowsAI' {
+            Get-AppxPackage -AllUsers '*Copilot*' -ErrorAction SilentlyContinue | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue
+            try { Set-Service -Name WSAIFabricSvc -StartupType Disabled -ErrorAction Stop } catch { }
+            try { Disable-WindowsOptionalFeature -FeatureName 'Recall' -Online -NoRestart -ErrorAction Stop | Out-Null } catch { }
+        }
+        'VisualFxMask' {
+            Set-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -Name 'UserPreferencesMask' -Type Binary -Value ([byte[]](144, 18, 3, 128, 16, 0, 0, 0)) -Force
+        }
+        'ReservedStorage' { & DISM.exe /Online /Set-ReservedStorageState /State:Disabled | Out-Null }
+        'Teredo'          { & netsh.exe interface teredo set state disabled | Out-Null }
+        'DisableIPv6'     { Disable-NetAdapterBinding -Name '*' -ComponentID 'ms_tcpip6' -ErrorAction SilentlyContinue }
+        'RazerBlock' {
+            $razer = "$env:SystemRoot\Installer\Razer"
+            if (Test-Path $razer) { Remove-Item "$razer\*" -Recurse -Force -ErrorAction SilentlyContinue }
+            else { New-Item -Path $razer -ItemType Directory -Force | Out-Null }
+            & icacls.exe $razer /deny 'Everyone:(W)' | Out-Null
         }
     }
 }
 
-function Invoke-GwtTweaksWorker {
-    param([string[]]$Keys)
+function Invoke-GwtOpData {
+    param([string]$Key)
+
+    $op = $sync.OpData[$Key]
+    if (-not $op) { Add-GwtLog "Operação '$Key' não encontrada." 'Warn'; return }
+
+    if ($op.ContainsKey('Reg')) {
+        foreach ($r in $op.Reg) { Set-GwtRegistryEntry -Path $r.P -Name $r.N -Value $r.V -Type $r.T }
+    }
+    if ($op.ContainsKey('Svc')) {
+        foreach ($s in $op.Svc) {
+            try { Set-GwtServiceStartup -Name $s.N -Startup $s.S }
+            catch { Add-GwtLog "Serviço $($s.N): $($_.Exception.Message)" 'Warn' }
+        }
+    }
+    if ($op.ContainsKey('Special')) { Invoke-GwtOpSpecial -Special $op.Special }
+}
+
+function Invoke-GwtApplyKeysWorker {
+    param([string[]]$Keys, [string]$Title, [string]$BackupName)
 
     try {
         $sync.Busy = $true
-        $sync.StatusText = 'Aplicando ajustes do Windows...'
-        Add-GwtLog '================ AJUSTES DO WINDOWS ================'
+        $sync.StatusText = "Aplicando: $Title..."
+        Add-GwtLog "================ $($Title.ToUpper()) ================"
 
         $backupKeys = @(
             'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced',
-            'HKCU\Software\Microsoft\Clipboard',
             'HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize',
-            'HKCU\Software\Policies\Microsoft\Windows\Explorer',
+            'HKCU\Software\Microsoft\Windows\CurrentVersion\Search',
+            'HKCU\Control Panel\Desktop',
+            'HKCU\Control Panel\Mouse',
+            'HKLM\SOFTWARE\Policies\Microsoft\Windows\System',
+            'HKLM\SOFTWARE\Policies\Microsoft\Edge',
             'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power'
         )
-        $backup = Backup-GwtRegistrySet -Name 'tweaks' -Keys $backupKeys
-        Add-GwtLog "Backup de ajustes criado em: $backup" 'Success'
+        $backup = Backup-GwtRegistrySet -Name $BackupName -Keys $backupKeys
+        Add-GwtLog "Backup criado em: $backup" 'Success'
 
+        $needExplorer = $false
         $failed = 0
         foreach ($key in $Keys) {
-            try { Invoke-GwtTweak -Key $key }
+            try {
+                Invoke-GwtOpData -Key $key
+                if ($sync.OpData[$key] -and $sync.OpData[$key].ContainsKey('Explorer')) { $needExplorer = $true }
+                Add-GwtLog "${key}: aplicado." 'Success'
+            }
             catch {
                 $failed++
-                Add-GwtLog "Ajuste '$key' falhou: $($_.Exception.Message)" 'Error'
+                Add-GwtLog "${key}: falhou — $($_.Exception.Message)" 'Error'
             }
         }
 
-        Add-GwtLog "Ajustes concluídos ($($Keys.Count - $failed) ok, $failed falha(s))." $(if ($failed -eq 0) { 'Success' } else { 'Warn' })
-        Request-GwtUi @{ Action = 'AskExplorerRestart' }
+        Add-GwtLog "$Title concluído ($($Keys.Count - $failed) ok, $failed falha(s))." $(if ($failed -eq 0) { 'Success' } else { 'Warn' })
+        if ($needExplorer) { Request-GwtUi @{ Action = 'AskExplorerRestart' } }
+        else { Request-GwtUi @{ Action = 'Message'; Title = $Title; Kind = $(if ($failed -eq 0) { 'Info' } else { 'Warning' })
+                               Text = "Concluído.`nAplicados: $($Keys.Count - $failed)`nFalhas: $failed" } }
     }
     catch {
-        Add-GwtLog "Falha nos ajustes: $($_.Exception.Message)" 'Error'
+        Add-GwtLog "Falha em '$Title': $($_.Exception.Message)" 'Error'
     }
+    finally {
+        $sync.Busy = $false
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
+function Invoke-GwtDebloatWorker {
+    param([object[]]$Packages)
+
+    try {
+        $sync.Busy = $true
+        $sync.ProgressMax = [double]$Packages.Count
+        $sync.ProgressValue = [double]0
+        Add-GwtLog "================ REMOÇÃO DE APPS DA STORE ($($Packages.Count)) ================"
+
+        $ok = 0; $index = 0
+        foreach ($pkg in $Packages) {
+            $index++
+            $sync.StatusText = "Removendo $($pkg.Name)..."
+            try {
+                Get-AppxPackage -AllUsers -Name $pkg.Id -ErrorAction SilentlyContinue | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue
+                Get-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue |
+                    Where-Object { $_.DisplayName -eq $pkg.Id } |
+                    Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Out-Null
+                Add-GwtLog "$($pkg.Name): removido (ou já ausente)." 'Success'
+                $ok++
+            }
+            catch { Add-GwtLog "$($pkg.Name): $($_.Exception.Message)" 'Warn' }
+            $sync.ProgressValue = [double]$index
+        }
+
+        Add-GwtLog "Remoção concluída ($ok de $($Packages.Count))." 'Success'
+        Request-GwtUi @{ Action = 'Message'; Title = 'Apps removidos'; Kind = 'Info'
+                         Text = "Processados: $($Packages.Count)`n`nSe algum app não sumiu na hora, reinicie o Explorer ou faça logoff." }
+    }
+    catch {
+        Add-GwtLog "Falha na remoção: $($_.Exception.Message)" 'Error'
+    }
+    finally {
+        $sync.Busy = $false
+        $sync.ProgressMax = [double]0
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
+function Invoke-GwtFeatureWorker {
+    param([object[]]$Features)
+
+    try {
+        $sync.Busy = $true
+        Add-GwtLog "================ RECURSOS DO WINDOWS ================"
+        $failed = 0
+        foreach ($feat in $Features) {
+            $sync.StatusText = "Ativando $($feat.Name)..."
+            Add-GwtLog "▶ $($feat.Name)"
+            try {
+                foreach ($fn in $feat.Features) {
+                    Enable-WindowsOptionalFeature -Online -FeatureName $fn -All -NoRestart -ErrorAction Stop | Out-Null
+                }
+                if ($feat.PSObject.Properties.Name -contains 'Special' -and $feat.Special) {
+                    Invoke-GwtFeatureSpecial -Special $feat.Special
+                }
+                Add-GwtLog "$($feat.Name): ativado." 'Success'
+            }
+            catch {
+                $failed++
+                Add-GwtLog "$($feat.Name): $($_.Exception.Message)" 'Error'
+            }
+        }
+        Add-GwtLog "Recursos concluídos ($($Features.Count - $failed) ok, $failed falha(s))." $(if ($failed -eq 0) { 'Success' } else { 'Warn' })
+        Request-GwtUi @{ Action = 'AskReboot' }
+    }
+    catch { Add-GwtLog "Falha nos recursos: $($_.Exception.Message)" 'Error' }
+    finally {
+        $sync.Busy = $false
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
+function Invoke-GwtFeatureSpecial {
+    param([string]$Special)
+
+    switch ($Special) {
+        'NFS' {
+            & nfsadmin.exe client stop 2>&1 | Out-Null
+            Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\ClientForNFS\CurrentVersion\Default' -Name 'AnonymousUID' -Type DWord -Value 0 -Force -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\ClientForNFS\CurrentVersion\Default' -Name 'AnonymousGID' -Type DWord -Value 0 -Force -ErrorAction SilentlyContinue
+            & nfsadmin.exe client start 2>&1 | Out-Null
+        }
+        'RegBackup' {
+            New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Configuration Manager' -Name 'EnablePeriodicBackup' -Type DWord -Value 1 -Force | Out-Null
+            $action = New-ScheduledTaskAction -Execute 'schtasks' -Argument '/run /i /tn "\Microsoft\Windows\Registry\RegIdleBackup"'
+            $trigger = New-ScheduledTaskTrigger -Daily -At 00:30
+            Register-ScheduledTask -Action $action -Trigger $trigger -TaskName 'GeniusRegBackup' -Description 'Backup diário do registro' -User 'System' -Force | Out-Null
+        }
+        'LegacyF8' { & bcdedit.exe /set '{current}' bootmenupolicy legacy | Out-Null }
+    }
+}
+
+function Invoke-GwtFixWorker {
+    param([string]$Fix)
+
+    try {
+        $sync.Busy = $true
+        switch ($Fix) {
+            'SystemRepair' {
+                $sync.StatusText = 'Reparo do sistema (DISM + SFC)...'
+                Add-GwtLog '================ REPARO DO SISTEMA ================'
+                Invoke-GwtNativeCommand -FilePath 'DISM.exe' -Arguments @('/Online', '/Cleanup-Image', '/RestoreHealth') -Description 'DISM RestoreHealth' | Out-Null
+                Invoke-GwtNativeCommand -FilePath 'sfc.exe' -Arguments @('/scannow') -Description 'SFC scannow' | Out-Null
+                Add-GwtLog 'Reparo do sistema concluído.' 'Success'
+            }
+            'UpdateReset' {
+                $sync.StatusText = 'Resetando o Windows Update...'
+                Add-GwtLog '================ RESET DO WINDOWS UPDATE ================'
+                foreach ($svc in 'wuauserv', 'bits', 'cryptsvc') { Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue }
+                $stamp = Get-Date -Format 'yyyyMMddHHmmss'
+                foreach ($dir in @("$env:SystemRoot\SoftwareDistribution", "$env:SystemRoot\System32\catroot2")) {
+                    if (Test-Path $dir) { try { Rename-Item -LiteralPath $dir -NewName "$(Split-Path $dir -Leaf).old-$stamp" -Force } catch { Add-GwtLog "Não foi possível renomear $dir" 'Warn' } }
+                }
+                foreach ($svc in 'cryptsvc', 'bits', 'wuauserv') { Start-Service -Name $svc -ErrorAction SilentlyContinue }
+                Add-GwtLog 'Windows Update resetado. Reinício recomendado.' 'Success'
+            }
+            'WingetFix' {
+                $sync.StatusText = 'Reinstalando o winget (App Installer)...'
+                Add-GwtLog '================ REINSTALAR WINGET ================'
+                try {
+                    Get-AppxPackage -AllUsers 'Microsoft.DesktopAppInstaller' -ErrorAction Stop |
+                        ForEach-Object { Add-AppxPackage -DisableDevelopmentMode -Register "$($_.InstallLocation)\AppXManifest.xml" -ErrorAction SilentlyContinue }
+                    Add-GwtLog 'App Installer reregistrado. Se persistir, atualize pela Microsoft Store.' 'Success'
+                } catch { Add-GwtLog "Não foi possível reregistrar: $($_.Exception.Message). Atualize o App Installer pela Store." 'Warn' }
+            }
+            'NtpFix' {
+                $sync.StatusText = 'Ajustando servidor de horário (NTP)...'
+                Add-GwtLog '================ SERVIDOR NTP ================'
+                & w32tm.exe /config /manualpeerlist:'pool.ntp.org' /syncfromflags:manual /update | Out-Null
+                Restart-Service w32time -ErrorAction SilentlyContinue
+                & w32tm.exe /resync | Out-Null
+                Add-GwtLog 'Servidor NTP ajustado para pool.ntp.org.' 'Success'
+            }
+        }
+        Request-GwtUi @{ Action = 'Message'; Title = 'Correção concluída'; Kind = 'Info'; Text = 'A rotina foi finalizada. Veja o log para detalhes.' }
+    }
+    catch { Add-GwtLog "Falha na correção: $($_.Exception.Message)" 'Error' }
+    finally {
+        $sync.Busy = $false
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
+function Invoke-GwtDnsWorker {
+    param([string]$Provider, $Servers)
+
+    try {
+        $sync.Busy = $true
+        Add-GwtLog "================ DNS: $Provider ================"
+        $adapters = @(Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' })
+        if (-not $adapters) { $adapters = @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' }) }
+
+        foreach ($adapter in $adapters) {
+            if ($null -eq $Servers) {
+                Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ResetServerAddresses -ErrorAction SilentlyContinue
+                Add-GwtLog "$($adapter.Name): DNS voltou ao automático (DHCP)." 'Success'
+            }
+            else {
+                $all = @($Servers.V4) + @($Servers.V6)
+                Set-DnsClientServerAddress -InterfaceIndex $adapter.ifIndex -ServerAddresses $all -ErrorAction Stop
+                Add-GwtLog "$($adapter.Name): DNS -> $($Servers.V4 -join ', ')." 'Success'
+            }
+        }
+        & ipconfig.exe /flushdns | Out-Null
+        Add-GwtLog 'DNS aplicado e cache limpo.' 'Success'
+    }
+    catch { Add-GwtLog "Falha ao aplicar DNS: $($_.Exception.Message)" 'Error' }
+    finally {
+        $sync.Busy = $false
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
+function Invoke-GwtPerfWorker {
+    param([string]$Mode)
+
+    try {
+        $sync.Busy = $true
+        $guid = 'e9a42b02-d5df-448d-aa00-03f14749eb61'  # Ultimate Performance
+        if ($Mode -eq 'Enable') {
+            Add-GwtLog 'Ativando plano de energia Desempenho Máximo...'
+            & powercfg.exe -duplicatescheme $guid | Out-Null
+            & powercfg.exe /setactive $guid | Out-Null
+            Add-GwtLog 'Plano Desempenho Máximo ativado.' 'Success'
+        }
+        else {
+            Add-GwtLog 'Removendo plano Desempenho Máximo...'
+            & powercfg.exe -delete $guid | Out-Null
+            Add-GwtLog 'Plano removido. Voltando ao Equilibrado.' 'Success'
+            & powercfg.exe /setactive '381b4222-f694-41f0-9685-ff5bb260df2e' | Out-Null
+        }
+    }
+    catch { Add-GwtLog "Falha no plano de energia: $($_.Exception.Message)" 'Error' }
     finally {
         $sync.Busy = $false
         $sync.StatusText = 'Pronto.'
@@ -1530,11 +2082,90 @@ function Invoke-GwtRunspace {
 
                     <TabItem Header="⚙️  Ajustes">
                         <Grid Margin="0,4,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0" Style="{StaticResource Card}" Padding="14" Margin="0,0,0,12">
+                                <StackPanel>
+                                    <TextBlock Text="Ajustes e preferências" FontSize="18" FontWeight="Bold"/>
+                                    <TextBlock Text="Preferências reversíveis de interface e sistema. Backup .reg é criado antes de aplicar; o Explorer reinicia ao final quando necessário." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Row="1" Style="{StaticResource Card}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <WrapPanel Name="PreferencesList" Orientation="Vertical" ItemHeight="30" MaxHeight="99999"/>
+                                </ScrollViewer>
+                            </Border>
+                            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Name="PreferencesApplyButton" Style="{StaticResource GoldButton}" Content="✨  Aplicar ajustes"/>
+                                <Button Name="PreferencesNoneButton" Style="{StaticResource GhostButton}" Content="Limpar seleção" Margin="0"/>
+                            </StackPanel>
+                        </Grid>
+                    </TabItem>
+
+                    <TabItem Header="🧹  Privacidade">
+                        <Grid Margin="0,4,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="14"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource Card}">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <StackPanel Grid.Row="0" Margin="0,0,0,8">
+                                            <TextBlock Text="Privacidade e limpeza" FontSize="18" FontWeight="Bold"/>
+                                            <TextBlock Text="Telemetria, rastreamento, bloat e ajustes de desempenho. Backup .reg antes de aplicar." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                                            <StackPanel Name="PrivacyList"/>
+                                        </ScrollViewer>
+                                    </Grid>
+                                </Border>
+                                <Border Grid.Column="2" Style="{StaticResource Card}">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <StackPanel Grid.Row="0" Margin="0,0,0,8">
+                                            <TextBlock Text="Remover apps da Store" FontSize="18" FontWeight="Bold"/>
+                                            <TextBlock Text="Desinstala apps pré-instalados do Windows para o usuário atual e novos usuários." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                                        </StackPanel>
+                                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                                            <StackPanel Name="AppxList"/>
+                                        </ScrollViewer>
+                                    </Grid>
+                                </Border>
+                            </Grid>
+                            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Name="PrivacyApplyButton" Style="{StaticResource GoldButton}" Content="🧹  Aplicar privacidade"/>
+                                <Button Name="DebloatRemoveButton" Style="{StaticResource GoldButton}" Content="🗑️  Remover apps marcados"/>
+                                <Button Name="PrivacyEssentialButton" Style="{StaticResource GhostButton}" Content="⭐ Só essenciais"/>
+                                <Button Name="PrivacyNoneButton" Style="{StaticResource GhostButton}" Content="Limpar" Margin="0"/>
+                                <TextBlock Text="Ações avançadas exigem cautela — leia a descrição de cada item." Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Grid>
+                    </TabItem>
+
+                    <TabItem Header="🧩  Recursos">
+                        <Grid Margin="0,4,0,0">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="430"/>
+                                <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="14"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
+
                             <Border Grid.Column="0" Style="{StaticResource Card}">
                                 <Grid>
                                     <Grid.RowDefinitions>
@@ -1542,21 +2173,49 @@ function Invoke-GwtRunspace {
                                         <RowDefinition Height="*"/>
                                         <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
-                                    <StackPanel Grid.Row="0">
-                                        <TextBlock Text="Ajustes práticos" FontSize="18" FontWeight="Bold"/>
-                                        <TextBlock Text="Pequenos ajustes comuns de pós-formatação, com backup .reg antes de aplicar." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,12"/>
+                                    <StackPanel Grid.Row="0" Margin="0,0,0,8">
+                                        <TextBlock Text="Recursos do Windows" FontSize="18" FontWeight="Bold"/>
+                                        <TextBlock Text="Ativa recursos opcionais. Alguns pedem reinício." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/>
                                     </StackPanel>
                                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                                        <StackPanel Name="TweaksList"/>
+                                        <StackPanel Name="FeatureList"/>
                                     </ScrollViewer>
-                                    <Button Grid.Row="2" Name="TweaksApplyButton" Style="{StaticResource GoldButton}" Content="✨  Aplicar ajustes" Margin="0,14,0,0"/>
+                                    <Button Grid.Row="2" Name="FeatureInstallButton" Style="{StaticResource GoldButton}" Content="🧩  Ativar recursos marcados" Margin="0,12,0,0"/>
                                 </Grid>
                             </Border>
+
                             <Border Grid.Column="2" Style="{StaticResource Card}">
-                                <StackPanel>
-                                    <TextBlock Text="Escopo" FontSize="18" FontWeight="Bold" Margin="0,0,0,10"/>
-                                    <TextBlock Text="Ajustes de usuário não exigem Administrador. Ajustes de sistema, como inicialização rápida, exigem. Todos os itens marcados geram backup .reg antes da aplicação, e o Explorer é reiniciado ao final para refletir as mudanças." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" LineHeight="22"/>
-                                </StackPanel>
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel>
+                                        <TextBlock Text="Correções rápidas" FontSize="18" FontWeight="Bold" Margin="0,0,0,8"/>
+                                        <WrapPanel>
+                                            <Button Name="SystemRepairButton" Style="{StaticResource GhostButton}" Content="🩹 Reparar sistema (DISM+SFC)" Margin="0,0,8,8"/>
+                                            <Button Name="UpdateResetButton" Style="{StaticResource GhostButton}" Content="♻️ Resetar Windows Update" Margin="0,0,8,8"/>
+                                            <Button Name="WingetFixButton" Style="{StaticResource GhostButton}" Content="📦 Reinstalar winget" Margin="0,0,8,8"/>
+                                            <Button Name="NtpFixButton" Style="{StaticResource GhostButton}" Content="🕒 Corrigir relógio (NTP)" Margin="0,0,8,8"/>
+                                        </WrapPanel>
+
+                                        <TextBlock Text="Servidor DNS" FontSize="18" FontWeight="Bold" Margin="0,16,0,8"/>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <ComboBox Name="DnsCombo" Height="36" Margin="0,0,8,0"/>
+                                            <Button Grid.Column="1" Name="DnsApplyButton" Style="{StaticResource GhostButton}" Content="Aplicar DNS" Margin="0"/>
+                                        </Grid>
+
+                                        <TextBlock Text="Plano de energia" FontSize="18" FontWeight="Bold" Margin="0,16,0,8"/>
+                                        <WrapPanel>
+                                            <Button Name="PerfEnableButton" Style="{StaticResource GhostButton}" Content="⚡ Desempenho Máximo" Margin="0,0,8,8"/>
+                                            <Button Name="PerfDisableButton" Style="{StaticResource GhostButton}" Content="Remover plano" Margin="0,0,8,8"/>
+                                        </WrapPanel>
+                                        <TextBlock Text="Desempenho Máximo não é recomendado para notebooks." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,4"/>
+
+                                        <TextBlock Text="Painéis clássicos do Windows" FontSize="18" FontWeight="Bold" Margin="0,16,0,8"/>
+                                        <WrapPanel Name="LegacyPanelList"/>
+                                    </StackPanel>
+                                </ScrollViewer>
                             </Border>
                         </Grid>
                     </TabItem>
@@ -1701,15 +2360,6 @@ foreach ($action in $NetworkActions) {
     [void]$sync.Controls['NetworkList'].Children.Add($check)
 }
 
-# --- Ajustes ---
-foreach ($tweak in $WindowsTweaks) {
-    $check = New-Object System.Windows.Controls.CheckBox
-    $check.Content = "$($tweak.Name)   [$($tweak.Scope)]"
-    $check.Tag = $tweak.Key
-    $check.IsChecked = [bool]$tweak.Default
-    [void]$sync.Controls['TweaksList'].Children.Add($check)
-}
-
 function Get-CheckedKeys {
     param([System.Windows.Controls.Panel]$Panel)
     $keys = @()
@@ -1719,6 +2369,95 @@ function Get-CheckedKeys {
         }
     }
     return $keys
+}
+
+# Adiciona um cabeçalho de categoria (texto dourado) a um painel.
+function Add-GwtCategoryHeader {
+    param([System.Windows.Controls.Panel]$Panel, [string]$Text, [string]$Margin = '0,8,24,4')
+    $label = New-Object System.Windows.Controls.TextBlock
+    $label.Text = $Text
+    $label.FontWeight = 'Bold'
+    $label.FontSize = 13
+    $label.Margin = $Margin
+    $label.Foreground = $Window.Resources['GoldBrush']
+    [void]$Panel.Children.Add($label)
+}
+
+# --- Ajustes (preferências, em grade por categoria) ---
+$lastCategory = $null
+foreach ($pref in $Preferences) {
+    if ($pref.Cat -ne $lastCategory) {
+        Add-GwtCategoryHeader -Panel $sync.Controls['PreferencesList'] -Text $pref.Cat
+        $lastCategory = $pref.Cat
+    }
+    $check = New-Object System.Windows.Controls.CheckBox
+    $check.Content = $pref.Name
+    $check.Tag = $pref.Key
+    $check.IsChecked = [bool]$pref.Default
+    $check.Margin = '0,2,24,2'
+    [void]$sync.Controls['PreferencesList'].Children.Add($check)
+}
+
+# --- Privacidade (por categoria) ---
+$lastCategory = $null
+foreach ($tw in $PrivacyTweaks) {
+    if ($tw.Cat -ne $lastCategory) {
+        Add-GwtCategoryHeader -Panel $sync.Controls['PrivacyList'] -Text $tw.Cat -Margin '0,10,0,4'
+        $lastCategory = $tw.Cat
+    }
+    $check = New-Object System.Windows.Controls.CheckBox
+    $check.Content = $tw.Name
+    $check.Tag = $tw.Key
+    $check.IsChecked = [bool]$tw.Default
+    [void]$sync.Controls['PrivacyList'].Children.Add($check)
+}
+
+# --- Apps da Store (por categoria) ---
+$lastCategory = $null
+foreach ($app in $AppxDebloat) {
+    if ($app.Cat -ne $lastCategory) {
+        Add-GwtCategoryHeader -Panel $sync.Controls['AppxList'] -Text $app.Cat -Margin '0,10,0,4'
+        $lastCategory = $app.Cat
+    }
+    $check = New-Object System.Windows.Controls.CheckBox
+    $check.Content = $app.Name
+    $check.Tag = $app
+    $check.ToolTip = $app.Id
+    $check.IsChecked = [bool]$app.Default
+    [void]$sync.Controls['AppxList'].Children.Add($check)
+}
+
+# --- Recursos do Windows ---
+foreach ($feat in $WinFeatures) {
+    $check = New-Object System.Windows.Controls.CheckBox
+    $check.Content = $feat.Name
+    $check.Tag = $feat
+    $check.IsChecked = [bool]$feat.Default
+    [void]$sync.Controls['FeatureList'].Children.Add($check)
+}
+
+# --- DNS ---
+foreach ($name in $DnsProviders.Keys) {
+    [void]$sync.Controls['DnsCombo'].Items.Add($name)
+}
+$sync.Controls['DnsCombo'].SelectedIndex = 0
+
+# --- Painéis clássicos ---
+foreach ($panelDef in $LegacyPanels) {
+    $btn = New-Object System.Windows.Controls.Button
+    $btn.Content = $panelDef.Name
+    $btn.Tag = $panelDef.Cmd
+    $btn.Style = $Window.Resources['GhostButton']
+    $btn.Margin = '0,0,8,8'
+    $btn.Add_Click({ try { Start-Process $this.Tag } catch { Add-GwtLog "Não foi possível abrir: $($this.Tag)" 'Warn' } })
+    [void]$sync.Controls['LegacyPanelList'].Children.Add($btn)
+}
+
+function Set-GwtPanelChecks {
+    param([System.Windows.Controls.Panel]$Panel, [bool]$Checked)
+    foreach ($child in $Panel.Children) {
+        if ($child -is [System.Windows.Controls.CheckBox]) { $child.IsChecked = $Checked }
+    }
 }
 
 # --- Programas ---
@@ -1794,15 +2533,29 @@ function Update-PackageFilter {
 #region Presets (exportar / importar / aplicar)
 # ============================================================================
 
+function Get-CheckedTags {
+    param([System.Windows.Controls.Panel]$Panel, [string]$Property = $null)
+    $vals = @()
+    foreach ($child in $Panel.Children) {
+        if ($child -is [System.Windows.Controls.CheckBox] -and $child.IsChecked) {
+            $vals += if ($Property) { [string]$child.Tag.$Property } else { [string]$child.Tag }
+        }
+    }
+    return $vals
+}
+
 function Get-CurrentSelectionPreset {
     [pscustomobject]@{
-        Version     = 1
+        Version     = 2
         Tool        = 'GeniusWindowsToolkit'
         SavedAt     = (Get-Date).ToString('o')
         TargetDrive = Get-SelectedDrive
         Folders     = @((Get-SelectedFolderDefs).Key)
         Network     = @(Get-CheckedKeys -Panel $sync.Controls['NetworkList'])
-        Tweaks      = @(Get-CheckedKeys -Panel $sync.Controls['TweaksList'])
+        Preferences = @(Get-CheckedKeys -Panel $sync.Controls['PreferencesList'])
+        Privacy     = @(Get-CheckedKeys -Panel $sync.Controls['PrivacyList'])
+        RemoveApps  = @(Get-CheckedTags -Panel $sync.Controls['AppxList'] -Property 'Id')
+        Features    = @(Get-CheckedTags -Panel $sync.Controls['FeatureList'] -Property 'Key')
         Packages    = @((Get-SelectedPackages).Key)
     }
 }
@@ -1825,9 +2578,27 @@ function Apply-PresetObject {
             $child.IsChecked = (@($PresetData.Network) -contains [string]$child.Tag)
         }
     }
-    if ($PresetData.PSObject.Properties.Name -contains 'Tweaks') {
-        foreach ($child in $sync.Controls['TweaksList'].Children) {
-            $child.IsChecked = (@($PresetData.Tweaks) -contains [string]$child.Tag)
+    # 'Tweaks' (preset v1) e 'Preferences' (v2) apontam para a aba Ajustes.
+    $prefList = if ($PresetData.PSObject.Properties.Name -contains 'Preferences') { $PresetData.Preferences }
+                elseif ($PresetData.PSObject.Properties.Name -contains 'Tweaks') { $PresetData.Tweaks } else { $null }
+    if ($null -ne $prefList) {
+        foreach ($child in $sync.Controls['PreferencesList'].Children) {
+            if ($child -is [System.Windows.Controls.CheckBox]) { $child.IsChecked = (@($prefList) -contains [string]$child.Tag) }
+        }
+    }
+    if ($PresetData.PSObject.Properties.Name -contains 'Privacy') {
+        foreach ($child in $sync.Controls['PrivacyList'].Children) {
+            if ($child -is [System.Windows.Controls.CheckBox]) { $child.IsChecked = (@($PresetData.Privacy) -contains [string]$child.Tag) }
+        }
+    }
+    if ($PresetData.PSObject.Properties.Name -contains 'RemoveApps') {
+        foreach ($child in $sync.Controls['AppxList'].Children) {
+            if ($child -is [System.Windows.Controls.CheckBox]) { $child.IsChecked = (@($PresetData.RemoveApps) -contains [string]$child.Tag.Id) }
+        }
+    }
+    if ($PresetData.PSObject.Properties.Name -contains 'Features') {
+        foreach ($child in $sync.Controls['FeatureList'].Children) {
+            if ($child -is [System.Windows.Controls.CheckBox]) { $child.IsChecked = (@($PresetData.Features) -contains [string]$child.Tag.Key) }
         }
     }
     if ($PresetData.PSObject.Properties.Name -contains 'Packages') {
@@ -1988,18 +2759,118 @@ $sync.Controls['PackageAllButton'].Add_Click({ Set-PackageSelection -Mode All })
 $sync.Controls['PackageNoneButton'].Add_Click({ Set-PackageSelection -Mode None })
 $sync.Controls['PackageSearchBox'].Add_TextChanged({ Update-PackageFilter })
 
-$sync.Controls['TweaksApplyButton'].Add_Click({
+$sync.Controls['PreferencesApplyButton'].Add_Click({
     if ($sync.Busy) { return }
-    $selected = Get-CheckedKeys -Panel $sync.Controls['TweaksList']
-    if (-not $selected) {
-        Add-GwtLog 'Nenhum ajuste selecionado.' 'Warn'
-        return
-    }
+    $selected = Get-CheckedKeys -Panel $sync.Controls['PreferencesList']
+    if (-not $selected) { Add-GwtLog 'Nenhum ajuste selecionado.' 'Warn'; return }
     if ([System.Windows.MessageBox]::Show($Window, "Aplicar $($selected.Count) ajuste(s)? Um backup .reg será criado antes.", 'Confirmar ajustes', 'YesNo', 'Question') -ne 'Yes') { return }
     Invoke-GwtRunspace -ScriptBlock {
         param($keys)
-        Invoke-GwtTweaksWorker -Keys $keys
+        Invoke-GwtApplyKeysWorker -Keys $keys -Title 'Ajustes do Windows' -BackupName 'preferences'
     } -Argument $selected
+})
+$sync.Controls['PreferencesNoneButton'].Add_Click({ Set-GwtPanelChecks -Panel $sync.Controls['PreferencesList'] -Checked $false })
+
+$sync.Controls['PrivacyApplyButton'].Add_Click({
+    if ($sync.Busy) { return }
+    $selected = Get-CheckedKeys -Panel $sync.Controls['PrivacyList']
+    if (-not $selected) { Add-GwtLog 'Nenhum item de privacidade selecionado.' 'Warn'; return }
+    $advanced = @($selected | Where-Object { $sync.OpData[$_] -and $sync.OpData[$_].ContainsKey('Special') })
+    $msg = "Aplicar $($selected.Count) item(ns) de privacidade/limpeza?`n`nUm backup .reg será criado antes. Alguns itens exigem Administrador e alguns são de ação avançada (remover Edge/OneDrive, IA, etc.).`n`nContinuar?"
+    if ([System.Windows.MessageBox]::Show($Window, $msg, 'Confirmar privacidade', 'YesNo', 'Warning') -ne 'Yes') { return }
+    Invoke-GwtRunspace -ScriptBlock {
+        param($keys)
+        Invoke-GwtApplyKeysWorker -Keys $keys -Title 'Privacidade e limpeza' -BackupName 'privacy'
+    } -Argument $selected
+})
+
+$sync.Controls['DebloatRemoveButton'].Add_Click({
+    if ($sync.Busy) { return }
+    $selected = @()
+    foreach ($child in $sync.Controls['AppxList'].Children) {
+        if ($child -is [System.Windows.Controls.CheckBox] -and $child.IsChecked) { $selected += $child.Tag }
+    }
+    if (-not $selected) { Add-GwtLog 'Nenhum app marcado para remoção.' 'Warn'; return }
+    if ([System.Windows.MessageBox]::Show($Window, "Remover $($selected.Count) app(s) da Store para o usuário atual e novos usuários?", 'Confirmar remoção', 'YesNo', 'Warning') -ne 'Yes') { return }
+    Invoke-GwtRunspace -ScriptBlock {
+        param($packages)
+        Invoke-GwtDebloatWorker -Packages $packages
+    } -Argument $selected
+})
+
+$sync.Controls['PrivacyEssentialButton'].Add_Click({
+    foreach ($child in $sync.Controls['PrivacyList'].Children) {
+        if ($child -is [System.Windows.Controls.CheckBox]) {
+            $def = $PrivacyTweaks | Where-Object { $_.Key -eq [string]$child.Tag }
+            $child.IsChecked = ($def -and $def.Cat -eq 'Essencial')
+        }
+    }
+})
+$sync.Controls['PrivacyNoneButton'].Add_Click({
+    Set-GwtPanelChecks -Panel $sync.Controls['PrivacyList'] -Checked $false
+    Set-GwtPanelChecks -Panel $sync.Controls['AppxList'] -Checked $false
+})
+
+$sync.Controls['FeatureInstallButton'].Add_Click({
+    if ($sync.Busy) { return }
+    if (-not (Test-GwtAdmin)) {
+        [System.Windows.MessageBox]::Show($Window, 'Ativar recursos do Windows exige Administrador. Use "Abrir como Administrador".', 'Administrador necessário', 'OK', 'Warning') | Out-Null
+        return
+    }
+    $selected = @()
+    foreach ($child in $sync.Controls['FeatureList'].Children) {
+        if ($child -is [System.Windows.Controls.CheckBox] -and $child.IsChecked) { $selected += $child.Tag }
+    }
+    if (-not $selected) { Add-GwtLog 'Nenhum recurso selecionado.' 'Warn'; return }
+    if ([System.Windows.MessageBox]::Show($Window, "Ativar $($selected.Count) recurso(s) do Windows? Pode exigir reinício.", 'Confirmar recursos', 'YesNo', 'Question') -ne 'Yes') { return }
+    Invoke-GwtRunspace -ScriptBlock {
+        param($features)
+        Invoke-GwtFeatureWorker -Features $features
+    } -Argument $selected
+})
+
+function Start-GwtFix {
+    param([string]$Fix, [string]$Label, [bool]$NeedAdmin = $true)
+    if ($sync.Busy) { return }
+    if ($NeedAdmin -and -not (Test-GwtAdmin)) {
+        [System.Windows.MessageBox]::Show($Window, "$Label exige Administrador. Use ""Abrir como Administrador"".", 'Administrador necessário', 'OK', 'Warning') | Out-Null
+        return
+    }
+    if ([System.Windows.MessageBox]::Show($Window, "Executar: $Label?", 'Confirmar', 'YesNo', 'Question') -ne 'Yes') { return }
+    Invoke-GwtRunspace -ScriptBlock {
+        param($f)
+        Invoke-GwtFixWorker -Fix $f
+    } -Argument $Fix
+}
+$sync.Controls['SystemRepairButton'].Add_Click({ Start-GwtFix -Fix 'SystemRepair' -Label 'Reparo do sistema (DISM + SFC)' })
+$sync.Controls['UpdateResetButton'].Add_Click({ Start-GwtFix -Fix 'UpdateReset' -Label 'Reset do Windows Update' })
+$sync.Controls['WingetFixButton'].Add_Click({ Start-GwtFix -Fix 'WingetFix' -Label 'Reinstalar winget' })
+$sync.Controls['NtpFixButton'].Add_Click({ Start-GwtFix -Fix 'NtpFix' -Label 'Corrigir relógio (NTP)' })
+
+$sync.Controls['DnsApplyButton'].Add_Click({
+    if ($sync.Busy) { return }
+    if (-not (Test-GwtAdmin)) {
+        [System.Windows.MessageBox]::Show($Window, 'Alterar DNS exige Administrador.', 'Administrador necessário', 'OK', 'Warning') | Out-Null
+        return
+    }
+    $name = [string]$sync.Controls['DnsCombo'].SelectedItem
+    if (-not $name) { return }
+    $servers = $DnsProviders[$name]
+    Invoke-GwtRunspace -ScriptBlock {
+        param($arg)
+        Invoke-GwtDnsWorker -Provider $arg.Name -Servers $arg.Servers
+    } -Argument @{ Name = $name; Servers = $servers }
+})
+
+$sync.Controls['PerfEnableButton'].Add_Click({
+    if ($sync.Busy) { return }
+    if (-not (Test-GwtAdmin)) { [System.Windows.MessageBox]::Show($Window, 'Alterar plano de energia exige Administrador.', 'Administrador necessário', 'OK', 'Warning') | Out-Null; return }
+    Invoke-GwtRunspace -ScriptBlock { Invoke-GwtPerfWorker -Mode 'Enable' }
+})
+$sync.Controls['PerfDisableButton'].Add_Click({
+    if ($sync.Busy) { return }
+    if (-not (Test-GwtAdmin)) { [System.Windows.MessageBox]::Show($Window, 'Alterar plano de energia exige Administrador.', 'Administrador necessário', 'OK', 'Warning') | Out-Null; return }
+    Invoke-GwtRunspace -ScriptBlock { Invoke-GwtPerfWorker -Mode 'Disable' }
 })
 
 $sync.Controls['DiagRunButton'].Add_Click({
@@ -2138,13 +3009,16 @@ function Invoke-PendingUiAction {
         }
         'DiagReady' {
             $sync.Controls['DiagnosticText'].Text = $sync.DiagReport
-            $sync.Controls['MainTabs'].SelectedIndex = 4
+            $sync.Controls['MainTabs'].SelectedIndex = 6
         }
     }
 }
 
 $ActionButtons = @('AnalyzeButton', 'MigrateButton', 'CopyOnlyButton', 'NetworkRunButton',
-                   'WingetInstallButton', 'WingetUpgradeButton', 'TweaksApplyButton', 'DiagRunButton')
+                   'WingetInstallButton', 'WingetUpgradeButton', 'PreferencesApplyButton',
+                   'PrivacyApplyButton', 'DebloatRemoveButton', 'FeatureInstallButton',
+                   'SystemRepairButton', 'UpdateResetButton', 'WingetFixButton', 'NtpFixButton',
+                   'DnsApplyButton', 'PerfEnableButton', 'PerfDisableButton', 'DiagRunButton')
 
 $UiTimer = New-Object System.Windows.Threading.DispatcherTimer
 $UiTimer.Interval = [TimeSpan]::FromMilliseconds(200)
@@ -2232,15 +3106,26 @@ if ($Config) {
 
 if ($SmokeTest) {
     $issues = @()
-    foreach ($name in @('MainTabs', 'DrivePanel', 'FolderList', 'NetworkList', 'PackageList', 'TweaksList', 'LogBox', 'Progress', 'StatusText') + $ActionButtons) {
+    $required = @('MainTabs', 'DrivePanel', 'FolderList', 'NetworkList', 'PackageList',
+                  'PreferencesList', 'PrivacyList', 'AppxList', 'FeatureList', 'DnsCombo',
+                  'LegacyPanelList', 'LogBox', 'Progress', 'StatusText') + $ActionButtons
+    foreach ($name in $required) {
         if (-not $sync.Controls.ContainsKey($name) -or $null -eq $sync.Controls[$name]) { $issues += $name }
     }
+    # Toda operação em OpData precisa de dados válidos (Reg/Svc/Special).
+    foreach ($k in $sync.OpData.Keys) {
+        $op = $sync.OpData[$k]
+        if (-not ($op.ContainsKey('Reg') -or $op.ContainsKey('Svc') -or $op.ContainsKey('Special'))) {
+            $issues += "OpData:$k"
+        }
+    }
     if ($issues) {
-        Write-Host "SMOKETEST FALHOU — controles ausentes: $($issues -join ', ')" -ForegroundColor Red
+        Write-Host "SMOKETEST FALHOU — problemas: $($issues -join ', ')" -ForegroundColor Red
         exit 1
     }
-    Write-Host ("SMOKETEST OK — janela construída, {0} controles, {1} pacotes, {2} pastas, {3} ações de rede, {4} ajustes." -f `
-        $sync.Controls.Count, $Packages.Count, $KnownFolders.Count, $NetworkActions.Count, $WindowsTweaks.Count) -ForegroundColor Green
+    Write-Host ("SMOKETEST OK — {0} controles, {1} pacotes, {2} pastas, {3} ações rede, {4} preferências, {5} privacidade, {6} apps, {7} recursos, {8} operações." -f `
+        $sync.Controls.Count, $Packages.Count, $KnownFolders.Count, $NetworkActions.Count, `
+        $Preferences.Count, $PrivacyTweaks.Count, $AppxDebloat.Count, $WinFeatures.Count, $sync.OpData.Count) -ForegroundColor Green
     exit 0
 }
 
