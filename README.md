@@ -90,8 +90,8 @@ Gera uma ISO personalizada do Windows 11 a partir de uma imagem oficial, em quat
 
 1. **Selecionar** a ISO oficial (`.iso`).
 2. **Montar e verificar** — lista as edições disponíveis (Home, Pro, etc.).
-3. **Modificar** — copia a imagem, remove apps pré-instalados (Teams, Copilot, Office Hub, Xbox, Solitaire, Clipchamp, Dev Home e outros), desativa telemetria e sugestões, permite conta local no OOBE e aplica **bypass dos requisitos** (TPM 2.0 / Secure Boot / CPU / RAM) para instalar em máquinas mais antigas. Opcionalmente injeta os **drivers da máquina atual** na imagem.
-4. **Gerar a ISO final** com `oscdimg` (instalado via winget se necessário), mantendo só a edição escolhida.
+3. **Modificar** — copia a imagem, remove apps pré-instalados (Teams, Copilot, Office Hub, Xbox, Solitaire, Clipchamp, Dev Home e outros), desativa telemetria e sugestões e aplica **bypass dos requisitos** (TPM 2.0 / Secure Boot / CPU / RAM). Opcionalmente injeta os **drivers da máquina atual** e, marcando **"Pular OOBE"**, grava um `autounattend.xml` que pula toda a configuração inicial e cria uma **conta local Administrador** (nome à sua escolha, sem senha — defina depois), com locale pt-BR.
+4. **Gerar a saída** — salvar como **arquivo ISO** (via `oscdimg`, instalado por winget se faltar) **ou gravar direto em um pendrive** (formata em FAT32/GPT e divide o `install.wim` automaticamente se passar de 4 GB). Ambas as opções mantêm só a edição escolhida.
 
 > 🛡️ **Diferença importante**: ao contrário de outras ferramentas, a ISO gerada mantém o **Windows Update funcional** — não desativamos os serviços de atualização (evita entregar um sistema que nunca mais se atualiza). Requer Administrador, leva de 15 a 40 minutos e usa ~10 GB de disco temporário.
 

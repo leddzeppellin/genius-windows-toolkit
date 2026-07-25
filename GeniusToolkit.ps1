@@ -88,6 +88,7 @@ $sync.IsoEditions    = @()
 $sync.IsoWorkDir     = $null
 $sync.IsoContentsDir = $null
 $sync.IsoReady       = $false   # install.wim já modificado, pronto para exportar
+$sync.IsoUsbDisks    = @()
 
 New-Item -ItemType Directory -Path $sync.BackupRoot, $sync.LogRoot, $sync.ReportRoot -Force | Out-Null
 
@@ -1533,6 +1534,148 @@ function Set-GwtOfflineReg {
     & reg.exe add $Path /v $Name /t $Type /d $Value /f 2>&1 | Out-Null
 }
 
+function Get-GwtAutounattendXml {
+    param([string]$AccountName = 'Usuario')
+
+    # autounattend.xml enxuto: pula todo o OOBE, cria conta local Administrador
+    # SEM senha (o técnico define depois) e configura locale pt-BR.
+    $safe = ($AccountName -replace '[^A-Za-z0-9_. -]', '').Trim()
+    if ([string]::IsNullOrWhiteSpace($safe)) { $safe = 'Usuario' }
+
+    @"
+<?xml version="1.0" encoding="utf-8"?>
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <InputLocale>0416:00010416</InputLocale>
+      <SystemLocale>pt-BR</SystemLocale>
+      <UILanguage>pt-BR</UILanguage>
+      <UserLocale>pt-BR</UserLocale>
+    </component>
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <NetworkLocation>Home</NetworkLocation>
+        <ProtectYourPC>3</ProtectYourPC>
+        <SkipMachineOOBE>true</SkipMachineOOBE>
+        <SkipUserOOBE>true</SkipUserOOBE>
+      </OOBE>
+      <TimeZone>E. South America Standard Time</TimeZone>
+      <UserAccounts>
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>$safe</Name>
+            <DisplayName>$safe</DisplayName>
+            <Group>Administrators</Group>
+            <Password>
+              <Value></Value>
+              <PlainText>true</PlainText>
+            </Password>
+          </LocalAccount>
+        </LocalAccounts>
+      </UserAccounts>
+    </component>
+  </settings>
+</unattend>
+"@
+}
+
+function Invoke-GwtIsoUsbWorker {
+    param([int]$DiskNumber, [string]$ContentsDir)
+
+    try {
+        $sync.Busy = $true
+        $sync.ProgressMax = [double]100
+        $sync.ProgressValue = [double]0
+        Add-GwtLog "================ CRIAR ISO: gravar no pendrive (Disco $DiskNumber) ================"
+
+        # 1. Limpar o disco
+        $sync.StatusText = 'Limpando o pendrive...'
+        $sync.ProgressValue = [double]10
+        Add-GwtLog "Limpando o Disco $DiskNumber (diskpart clean)..."
+        $dp = Join-Path $env:TEMP "gwt_dp_$(Get-Random).txt"
+        "select disk $DiskNumber`r`nclean`r`nexit" | Set-Content -Path $dp -Encoding ASCII
+        & diskpart.exe /s $dp 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { Add-GwtLog "  diskpart: $($_.Trim())" }
+        Remove-Item $dp -Force -ErrorAction SilentlyContinue
+
+        # 2. Inicializar como GPT
+        Start-Sleep -Seconds 2
+        Update-Disk -Number $DiskNumber
+        $disk = Get-Disk -Number $DiskNumber
+        if ($disk.PartitionStyle -eq 'RAW') { Initialize-Disk -Number $DiskNumber -PartitionStyle GPT }
+        else { Set-Disk -Number $DiskNumber -PartitionStyle GPT }
+        Add-GwtLog "Disco inicializado como GPT." 'Success'
+
+        # 3. Criar partição FAT32 (limitada a 32 GB, exigência do FAT32)
+        $sync.StatusText = 'Criando partição...'
+        $sync.ProgressValue = [double]22
+        $label = 'GWT-' + (Get-Date).ToString('yyMMdd')
+        $diskMB = [int][Math]::Floor((Get-Disk -Number $DiskNumber).Size / 1MB)
+        $createCmd = if ($diskMB -gt 32768) { 'create partition primary size=32768' } else { 'create partition primary' }
+        $dp2 = Join-Path $env:TEMP "gwt_dp2_$(Get-Random).txt"
+        "select disk $DiskNumber`r`n$createCmd`r`nexit" | Set-Content -Path $dp2 -Encoding ASCII
+        & diskpart.exe /s $dp2 2>&1 | Where-Object { $_ -match '\S' } | ForEach-Object { Add-GwtLog "  diskpart: $($_.Trim())" }
+        Remove-Item $dp2 -Force -ErrorAction SilentlyContinue
+
+        Start-Sleep -Seconds 3
+        Update-Disk -Number $DiskNumber
+        $part = Get-Partition -DiskNumber $DiskNumber | Where-Object { $_.Type -eq 'Basic' } | Select-Object -Last 1
+        if (-not $part) { throw "Partição não encontrada no Disco $DiskNumber após a criação." }
+
+        # 4. Formatar FAT32
+        $sync.StatusText = 'Formatando FAT32...'
+        $sync.ProgressValue = [double]30
+        Add-GwtLog "Formatando como FAT32 (rótulo $label)..."
+        Get-Partition -DiskNumber $DiskNumber -PartitionNumber $part.PartitionNumber |
+            Format-Volume -FileSystem FAT32 -NewFileSystemLabel $label -Force -Confirm:$false | Out-Null
+
+        # 5. Atribuir letra
+        Start-Sleep -Seconds 2
+        Update-Disk -Number $DiskNumber
+        $used = (Get-PSDrive -PSProvider FileSystem).Name
+        $letter = $null
+        foreach ($c in [char[]](68..90)) { if ($used -notcontains [string]$c) { $letter = [string]$c; break } }
+        if (-not $letter) { throw 'Sem letras de unidade livres (D-Z).' }
+        Set-Partition -DiskNumber $DiskNumber -PartitionNumber $part.PartitionNumber -NewDriveLetter $letter
+        $usb = "${letter}:"
+        for ($i = 0; $i -lt 6 -and -not (Test-Path $usb); $i++) { Start-Sleep -Seconds 2 }
+        if (-not (Test-Path $usb)) { throw "A unidade $usb não ficou acessível." }
+        Add-GwtLog "Pendrive em $usb" 'Success'
+
+        # 6. Copiar (com split do install.wim > 3800 MB, limite do FAT32)
+        $sync.StatusText = 'Copiando arquivos para o pendrive...'
+        $sync.ProgressValue = [double]45
+        $wim = Join-Path $ContentsDir 'sources\install.wim'
+        if ((Test-Path $wim) -and ([math]::Round((Get-Item $wim).Length / 1MB) -gt 3800)) {
+            Add-GwtLog 'install.wim > 4 GB: dividindo em install.swm para caber no FAT32...'
+            New-Item -ItemType Directory -Path (Join-Path $usb 'sources') -Force | Out-Null
+            Split-WindowsImage -ImagePath $wim -SplitImagePath (Join-Path $usb 'sources\install.swm') -FileSize 3800 | Out-Null
+            Add-GwtLog 'Divisão concluída. Copiando o restante...'
+            & robocopy.exe $ContentsDir $usb /E /XF install.wim /NFL /NDL /NJH /NJS /NP | Out-Null
+        }
+        else {
+            & robocopy.exe $ContentsDir $usb /E /NFL /NDL /NJH /NJS /NP | Out-Null
+        }
+
+        $sync.ProgressValue = [double]100
+        Add-GwtLog 'Pendrive pronto para boot e instalação.' 'Success'
+        Request-GwtUi @{ Action = 'Message'; Title = 'Pendrive pronto'; Kind = 'Info'
+                         Text = "Pendrive criado com sucesso em $usb`n`nJá pode dar boot por ele para instalar o Windows." }
+    }
+    catch {
+        Add-GwtLog "Falha ao gravar no pendrive: $($_.Exception.Message)" 'Error'
+        Request-GwtUi @{ Action = 'Message'; Title = 'Erro no pendrive'; Text = $_.Exception.Message; Kind = 'Error' }
+    }
+    finally {
+        $sync.Busy = $false
+        $sync.ProgressMax = [double]0
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
 function Invoke-GwtIsoMountWorker {
     param([string]$IsoPath)
 
@@ -1691,7 +1834,7 @@ function Invoke-GwtIsoApplyDebloat {
 }
 
 function Invoke-GwtIsoModifyWorker {
-    param([int]$Index, [string]$EditionName, [bool]$InjectDrivers)
+    param([int]$Index, [string]$EditionName, [bool]$InjectDrivers, [bool]$SkipOobe, [string]$AccountName)
 
     $mountDir = $null
     try {
@@ -1740,6 +1883,12 @@ function Invoke-GwtIsoModifyWorker {
         $sync.StatusText = 'Aplicando modificações...'
         $sync.ProgressValue = [double]45
         Invoke-GwtIsoApplyDebloat -MountDir $mountDir -IsoContents $isoContents -EditionId $editionId
+
+        if ($SkipOobe) {
+            Add-GwtLog "Gravando autounattend.xml (pula OOBE, conta local '$AccountName')..."
+            Get-GwtAutounattendXml -AccountName $AccountName | Set-Content -Path (Join-Path $isoContents 'autounattend.xml') -Encoding UTF8 -Force
+            Add-GwtLog 'autounattend.xml gravado na raiz da ISO.' 'Success'
+        }
 
         if ($InjectDrivers) {
             $sync.StatusText = 'Injetando drivers do sistema atual...'
@@ -2650,19 +2799,40 @@ function Invoke-GwtRunspace {
                                         <Border Background="{StaticResource SoftBrush}" CornerRadius="10" Padding="14" Margin="0,0,0,10">
                                             <StackPanel>
                                                 <TextBlock Text="3 · Modificar a imagem" FontWeight="Bold" Margin="0,0,0,8"/>
-                                                <CheckBox Name="IsoInjectDriversCheck" Content="Injetar os drivers desta máquina na ISO" Margin="0,0,0,8"
+                                                <CheckBox Name="IsoInjectDriversCheck" Content="Injetar os drivers desta máquina na ISO" Margin="0,0,0,6"
                                                           ToolTip="Exporta os drivers do sistema atual e injeta no install.wim (útil para o mesmo modelo de máquina)."/>
+                                                <CheckBox Name="IsoSkipOobeCheck" Content="Pular OOBE e criar conta local automática" Margin="0,0,0,6" IsChecked="True"
+                                                          ToolTip="Gera um autounattend.xml que pula toda a configuração inicial e cria uma conta local Administrador (sem senha — defina depois)."/>
+                                                <Grid Margin="0,0,0,10">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="Nome da conta:" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                                    <TextBox Grid.Column="1" Name="IsoAccountBox" Text="Usuario" VerticalContentAlignment="Center"/>
+                                                </Grid>
                                                 <Button Name="IsoModifyButton" Style="{StaticResource GoldButton}" Content="🛠️  Modificar install.wim" HorizontalAlignment="Left" IsEnabled="False"/>
                                             </StackPanel>
                                         </Border>
 
                                         <Border Background="{StaticResource SoftBrush}" CornerRadius="10" Padding="14">
                                             <StackPanel>
-                                                <TextBlock Text="4 · Gerar a ISO final" FontWeight="Bold" Margin="0,0,0,8"/>
-                                                <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="4 · Gerar a saída" FontWeight="Bold" Margin="0,0,0,8"/>
+                                                <TextBlock Text="Salvar como arquivo ISO:" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                                                     <Button Name="IsoExportButton" Style="{StaticResource GoldButton}" Content="💿  Salvar ISO..." IsEnabled="False"/>
                                                     <Button Name="IsoCleanButton" Style="{StaticResource GhostButton}" Content="🧽  Limpar e recomeçar" Margin="0"/>
                                                 </StackPanel>
+                                                <TextBlock Text="Ou gravar direto em um pendrive (apaga tudo nele):" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,4"/>
+                                                <Grid Margin="0,0,0,8">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <ComboBox Name="IsoUsbCombo" Height="36" Margin="0,0,8,0"/>
+                                                    <Button Grid.Column="1" Name="IsoUsbRefreshButton" Style="{StaticResource GhostButton}" Content="🔄" Margin="0" ToolTip="Atualizar lista de pendrives"/>
+                                                </Grid>
+                                                <Button Name="IsoUsbWriteButton" Style="{StaticResource GoldButton}" Content="🔌  Gravar no pendrive" HorizontalAlignment="Left" IsEnabled="False"/>
                                             </StackPanel>
                                         </Border>
                                     </StackPanel>
@@ -3375,12 +3545,70 @@ $sync.Controls['IsoModifyButton'].Add_Click({
     if ($item -match '^(\d+):') { $index = [int]$Matches[1] }
     $name = ($item -replace '^\d+:\s*', '')
     $inject = [bool]$sync.Controls['IsoInjectDriversCheck'].IsChecked
+    $skipOobe = [bool]$sync.Controls['IsoSkipOobeCheck'].IsChecked
+    $account = [string]$sync.Controls['IsoAccountBox'].Text
     $msg = "Modificar a install.wim da edição:`n$name`n`nIsso copia a ISO (~5-6 GB), remove bloatware, aplica os ajustes e recria a imagem. Pode levar de 15 a 40 minutos e usa bastante disco temporário.`n`nContinuar?"
     if ([System.Windows.MessageBox]::Show($Window, $msg, 'Confirmar modificação', 'YesNo', 'Warning') -ne 'Yes') { return }
     Invoke-GwtRunspace -ScriptBlock {
         param($arg)
-        Invoke-GwtIsoModifyWorker -Index $arg.Index -EditionName $arg.Name -InjectDrivers $arg.Inject
-    } -Argument @{ Index = $index; Name = $name; Inject = $inject }
+        Invoke-GwtIsoModifyWorker -Index $arg.Index -EditionName $arg.Name -InjectDrivers $arg.Inject -SkipOobe $arg.SkipOobe -AccountName $arg.Account
+    } -Argument @{ Index = $index; Name = $name; Inject = $inject; SkipOobe = $skipOobe; Account = $account }
+})
+
+$sync.Controls['IsoUsbRefreshButton'].Add_Click({
+    $combo = $sync.Controls['IsoUsbCombo']
+    $combo.Items.Clear()
+    if (-not (Test-GwtAdmin)) {
+        $combo.Items.Add('Requer Administrador') | Out-Null
+        $combo.SelectedIndex = 0
+        $sync.Controls['IsoUsbWriteButton'].IsEnabled = $false
+        return
+    }
+    $disks = @(Get-Disk | Where-Object { $_.BusType -eq 'USB' } | Sort-Object Number)
+    $sync.IsoUsbDisks = $disks
+    if ($disks.Count -eq 0) {
+        $combo.Items.Add('Nenhum pendrive detectado') | Out-Null
+        $combo.SelectedIndex = 0
+        $sync.Controls['IsoUsbWriteButton'].IsEnabled = $false
+        Add-GwtLog 'Nenhum pendrive USB detectado.' 'Warn'
+        return
+    }
+    foreach ($d in $disks) {
+        $gb = [math]::Round($d.Size / 1GB, 1)
+        [void]$combo.Items.Add("Disco $($d.Number): $($d.FriendlyName)  [$gb GB]")
+    }
+    $combo.SelectedIndex = 0
+    $sync.Controls['IsoUsbWriteButton'].IsEnabled = $true
+    Add-GwtLog "$($disks.Count) pendrive(s) encontrado(s)." 'Success'
+})
+
+$sync.Controls['IsoUsbWriteButton'].Add_Click({
+    if ($sync.Busy) { return }
+    if (-not (Test-GwtAdmin)) {
+        [System.Windows.MessageBox]::Show($Window, 'Gravar em pendrive exige Administrador.', 'Administrador necessário', 'OK', 'Warning') | Out-Null
+        return
+    }
+    if (-not $sync.IsoReady) {
+        [System.Windows.MessageBox]::Show($Window, 'Modifique a imagem (passo 3) antes de gravar.', 'Ainda não pronto', 'OK', 'Warning') | Out-Null
+        return
+    }
+    $idx = $sync.Controls['IsoUsbCombo'].SelectedIndex
+    $disks = @($sync.IsoUsbDisks)
+    if ($idx -lt 0 -or $idx -ge $disks.Count) {
+        [System.Windows.MessageBox]::Show($Window, 'Selecione um pendrive na lista (clique em 🔄 para atualizar).', 'Pendrive', 'OK', 'Warning') | Out-Null
+        return
+    }
+    $disk = $disks[$idx]
+    $gb = [math]::Round($disk.Size / 1GB, 1)
+    $msg = "TODOS os dados do Disco $($disk.Number) ($($disk.FriendlyName), $gb GB) serão APAGADOS PERMANENTEMENTE.`n`nTem certeza que deseja continuar?"
+    if ([System.Windows.MessageBox]::Show($Window, $msg, 'Confirmar apagamento do pendrive', 'YesNo', 'Warning') -ne 'Yes') {
+        Add-GwtLog 'Gravação em pendrive cancelada.' 'Warn'
+        return
+    }
+    Invoke-GwtRunspace -ScriptBlock {
+        param($arg)
+        Invoke-GwtIsoUsbWorker -DiskNumber $arg.Disk -ContentsDir $arg.Dir
+    } -Argument @{ Disk = [int]$disk.Number; Dir = $sync.IsoContentsDir }
 })
 
 $sync.Controls['IsoExportButton'].Add_Click({
@@ -3553,6 +3781,9 @@ function Invoke-PendingUiAction {
         }
         'IsoModified' {
             $sync.Controls['IsoExportButton'].IsEnabled = $true
+            if ($sync.Controls['IsoUsbCombo'].Items.Count -gt 0 -and $sync.IsoUsbDisks.Count -gt 0) {
+                $sync.Controls['IsoUsbWriteButton'].IsEnabled = $true
+            }
         }
         'IsoReset' {
             $sync.Controls['IsoPathBox'].Text = 'Nenhuma ISO selecionada...'
@@ -3560,6 +3791,7 @@ function Invoke-PendingUiAction {
             $sync.Controls['IsoEditionCombo'].IsEnabled = $false
             $sync.Controls['IsoModifyButton'].IsEnabled = $false
             $sync.Controls['IsoExportButton'].IsEnabled = $false
+            $sync.Controls['IsoUsbWriteButton'].IsEnabled = $false
         }
     }
 }
@@ -3569,7 +3801,7 @@ $ActionButtons = @('AnalyzeButton', 'MigrateButton', 'CopyOnlyButton', 'NetworkR
                    'PrivacyApplyButton', 'DebloatRemoveButton', 'FeatureInstallButton',
                    'SystemRepairButton', 'UpdateResetButton', 'WingetFixButton', 'NtpFixButton',
                    'DnsApplyButton', 'PerfEnableButton', 'PerfDisableButton', 'DiagRunButton',
-                   'IsoMountButton', 'IsoModifyButton', 'IsoExportButton', 'IsoCleanButton')
+                   'IsoMountButton', 'IsoModifyButton', 'IsoExportButton', 'IsoCleanButton', 'IsoUsbWriteButton')
 
 $UiTimer = New-Object System.Windows.Threading.DispatcherTimer
 $UiTimer.Interval = [TimeSpan]::FromMilliseconds(200)
@@ -3660,6 +3892,7 @@ if ($SmokeTest) {
     $required = @('MainTabs', 'DrivePanel', 'FolderList', 'NetworkList', 'PackageList',
                   'PreferencesList', 'PrivacyList', 'AppxList', 'FeatureList', 'DnsCombo',
                   'LegacyPanelList', 'IsoPathBox', 'IsoEditionCombo', 'IsoInjectDriversCheck',
+                  'IsoSkipOobeCheck', 'IsoAccountBox', 'IsoUsbCombo', 'IsoUsbRefreshButton',
                   'LogBox', 'Progress', 'StatusText') + $ActionButtons
     foreach ($name in $required) {
         if (-not $sync.Controls.ContainsKey($name) -or $null -eq $sync.Controls[$name]) { $issues += $name }
@@ -3671,6 +3904,9 @@ if ($SmokeTest) {
             $issues += "OpData:$k"
         }
     }
+    # O autounattend.xml precisa ser XML válido.
+    try { [xml](Get-GwtAutounattendXml -AccountName 'Teste') | Out-Null }
+    catch { $issues += 'autounattend-xml-invalido' }
     if ($issues) {
         Write-Host "SMOKETEST FALHOU — problemas: $($issues -join ', ')" -ForegroundColor Red
         exit 1
