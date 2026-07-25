@@ -46,6 +46,10 @@ $ErrorActionPreference = 'Stop'
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
+# Logo da marca (PNG em base64). Preenchido por tools\embed-logo.ps1 a partir de
+# assets\genius-info-logo.png — mantém a execução via "irm | iex" autossuficiente.
+$LogoBase64 = ''
+
 # ============================================================================
 #region Estado compartilhado (UI <-> runspaces)
 # ============================================================================
@@ -2804,7 +2808,7 @@ function Invoke-GwtRunspace {
 [xml]$Xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Genius Windows Toolkit"
+        Title="Genius Windows Toolkit — by Ricardo Valério S."
         Width="1340" Height="850"
         MinWidth="1120" MinHeight="720"
         WindowStartupLocation="CenterScreen"
@@ -3029,9 +3033,12 @@ function Invoke-GwtRunspace {
         <!-- Barra de título -->
         <Grid Grid.Row="0" Background="{StaticResource BgBrush}">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="18,0,0,0">
-                <TextBlock Text="🧞" FontSize="20" VerticalAlignment="Center"/>
+                <Image Name="TitleLogo" Height="24" Margin="0,0,10,0" VerticalAlignment="Center" Stretch="Uniform" Visibility="Collapsed"/>
+                <TextBlock Name="TitleEmoji" Text="🧞" FontSize="20" VerticalAlignment="Center"/>
                 <TextBlock Text="Genius Windows Toolkit" FontSize="15" FontWeight="Bold" Margin="10,0,0,0" VerticalAlignment="Center"/>
                 <TextBlock Name="TitleVersionText" Text="v0.0.0" FontSize="12" Foreground="{StaticResource MutedBrush}" Margin="10,2,0,0" VerticalAlignment="Center"/>
+                <Border Width="1" Height="16" Background="{StaticResource LineBrush}" Margin="12,0,12,0" VerticalAlignment="Center"/>
+                <TextBlock Text="by Ricardo Valério S." FontSize="12" Foreground="{StaticResource GoldBrush}" FontWeight="SemiBold" VerticalAlignment="Center"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,0">
                 <Button Name="MinButton" Style="{StaticResource TitleButton}" Content="—"/>
@@ -3059,7 +3066,10 @@ function Invoke-GwtRunspace {
                     </Grid.RowDefinitions>
 
                     <StackPanel Grid.Row="0">
-                        <TextBlock Text="Ferramenta de bancada" Foreground="{StaticResource GoldBrush}" FontWeight="SemiBold" FontSize="12"/>
+                        <Border Name="LogoPlate" Background="#F4F6F8" CornerRadius="12" Padding="14,12" Margin="0,0,0,14" Visibility="Collapsed">
+                            <Image Name="LogoImage" Stretch="Uniform" MaxHeight="120" HorizontalAlignment="Center"/>
+                        </Border>
+                        <TextBlock Name="BrandKicker" Text="Ferramenta de bancada" Foreground="{StaticResource GoldBrush}" FontWeight="SemiBold" FontSize="12"/>
                         <TextBlock Text="Pós-formatação sem dor" FontSize="21" FontWeight="Bold" Margin="0,2,0,6" TextWrapping="Wrap"/>
                         <TextBlock Text="Migração de pastas, rede, programas, ajustes e diagnóstico — tudo com backup e log." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" LineHeight="19"/>
                     </StackPanel>
@@ -3565,6 +3575,39 @@ $Xaml.SelectNodes('//*[@Name]') | ForEach-Object {
 $sync.Controls['TitleVersionText'].Text = "v$($sync.Version)"
 $sync.Controls['AdminText'].Text = "Administrador: $(if (Test-GwtAdmin) { 'Sim ✔' } else { 'Não' })"
 $sync.Controls['ProfileText'].Text = "Perfil: $env:USERPROFILE"
+
+# Logo da marca: usa o base64 embutido (funciona via irm|iex) ou o arquivo local
+# assets\genius-info-logo.png (ao lado do script, no pendrive). Sem logo, mostra o fallback.
+function Show-GwtLogo {
+    $bytes = $null
+    if (-not [string]::IsNullOrWhiteSpace($LogoBase64)) {
+        try { $bytes = [Convert]::FromBase64String($LogoBase64) } catch { $bytes = $null }
+    }
+    if (-not $bytes -and -not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+        $localLogo = Join-Path (Split-Path -Parent $PSCommandPath) 'assets\genius-info-logo.png'
+        if (Test-Path -LiteralPath $localLogo) { try { $bytes = [IO.File]::ReadAllBytes($localLogo) } catch { } }
+    }
+    if (-not $bytes) { return }
+
+    try {
+        $img = New-Object System.Windows.Media.Imaging.BitmapImage
+        $ms = New-Object System.IO.MemoryStream (, $bytes)
+        $img.BeginInit()
+        $img.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+        $img.StreamSource = $ms
+        $img.EndInit()
+        $img.Freeze()
+
+        $sync.Controls['LogoImage'].Source = $img
+        $sync.Controls['LogoPlate'].Visibility = 'Visible'
+        $sync.Controls['TitleLogo'].Source = $img
+        $sync.Controls['TitleLogo'].Visibility = 'Visible'
+        $sync.Controls['TitleEmoji'].Visibility = 'Collapsed'
+        $sync.Controls['BrandKicker'].Visibility = 'Collapsed'
+    }
+    catch { }
+}
+Show-GwtLogo
 
 function Invalidate-Plan {
     $sync.PlanValid = $false

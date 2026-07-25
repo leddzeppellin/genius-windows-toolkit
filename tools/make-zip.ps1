@@ -14,6 +14,12 @@ Copy-Item (Join-Path $root 'README.md')                $staging
 Copy-Item (Join-Path $root 'LICENSE')                  $staging
 Copy-Item (Join-Path $root 'presets\*.json')           (Join-Path $staging 'presets')
 
+$assets = Join-Path $root 'assets'
+if (Test-Path $assets) {
+    New-Item -ItemType Directory -Path (Join-Path $staging 'assets') -Force | Out-Null
+    Copy-Item (Join-Path $assets '*') (Join-Path $staging 'assets') -Recurse
+}
+
 if (Test-Path $dest) { Remove-Item $dest -Force }
 Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $dest -Force
 Remove-Item $staging -Recurse -Force
