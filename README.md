@@ -56,7 +56,7 @@ Rotina completa para redes legadas (NAS, DVR, impressoras antigas, compartilhame
 
 ## 📦 Programas (winget)
 
-Catálogo estilo Ninite com IDs validados e sem duplicatas: navegadores, mensageria, compactadores, mídia, VC++ Redistributables, .NET, Java (Temurin), imagem, utilitários de bancada (CPU-Z, HWiNFO, CrystalDiskInfo, AnyDesk, RustDesk...), documentos, segurança e desenvolvimento.
+Catálogo amplo (mais de 200 programas) organizado em categorias: Navegadores, Comunicação, Multimídia, Utilitários, Ferramentas Pro (redes, VPN, benchmark), Ferramentas Microsoft (Sysinternals, PowerToys, runtimes), Desenvolvimento, Jogos, Self-hosted e **Backup e Segurança** (Hasleo Backup Suite, Malwarebytes, AdwCleaner). Instala tanto do repositório winget quanto da Microsoft Store (`msstore`).
 
 - Busca instantânea, botões **Kit básico / Tudo / Limpar**
 - Instalação silenciosa com resumo final (instalados × falhas)

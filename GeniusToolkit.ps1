@@ -155,115 +155,226 @@ $Preferences = @(
 
 # Catálogo winget curado — IDs validados, sem duplicatas nem pacotes mortos.
 $Packages = @(
-    [pscustomobject]@{ Category='Navegadores'; Name='Google Chrome'; Id='Google.Chrome'; Default=$true }
-    [pscustomobject]@{ Category='Navegadores'; Name='Mozilla Firefox'; Id='Mozilla.Firefox'; Default=$false }
-    [pscustomobject]@{ Category='Navegadores'; Name='Microsoft Edge'; Id='Microsoft.Edge'; Default=$false }
     [pscustomobject]@{ Category='Navegadores'; Name='Brave'; Id='Brave.Brave'; Default=$false }
-    [pscustomobject]@{ Category='Navegadores'; Name='Opera'; Id='Opera.Opera'; Default=$false }
-    [pscustomobject]@{ Category='Navegadores'; Name='Vivaldi'; Id='VivaldiTechnologies.Vivaldi'; Default=$false }
+    [pscustomobject]@{ Category='Navegadores'; Name='Chrome'; Id='Google.Chrome'; Default=$true  }
+    [pscustomobject]@{ Category='Navegadores'; Name='Chromium'; Id='Hibbiki.Chromium'; Default=$false }
+    [pscustomobject]@{ Category='Navegadores'; Name='Edge'; Id='Microsoft.Edge'; Default=$false }
+    [pscustomobject]@{ Category='Navegadores'; Name='Firefox'; Id='Mozilla.Firefox'; Default=$false }
+    [pscustomobject]@{ Category='Navegadores'; Name='Firefox ESR'; Id='Mozilla.Firefox.ESR'; Default=$false }
+    [pscustomobject]@{ Category='Navegadores'; Name='Floorp'; Id='Ablaze.Floorp'; Default=$false }
+    [pscustomobject]@{ Category='Navegadores'; Name='Helium'; Id='ImputNet.Helium'; Default=$false }
+    [pscustomobject]@{ Category='Navegadores'; Name='LibreWolf'; Id='LibreWolf.LibreWolf'; Default=$false }
+    [pscustomobject]@{ Category='Navegadores'; Name='Mullvad Browser'; Id='MullvadVPN.MullvadBrowser'; Default=$false }
+    [pscustomobject]@{ Category='Navegadores'; Name='Tor Browser'; Id='TorProject.TorBrowser'; Default=$false }
+    [pscustomobject]@{ Category='Navegadores'; Name='Ungoogled Chromium'; Id='eloston.ungoogled-chromium'; Default=$false }
+    [pscustomobject]@{ Category='Navegadores'; Name='Vivaldi'; Id='Vivaldi.Vivaldi'; Default=$false }
+    [pscustomobject]@{ Category='Navegadores'; Name='Waterfox'; Id='Waterfox.Waterfox'; Default=$false }
+    [pscustomobject]@{ Category='Navegadores'; Name='Zen Browser'; Id='Zen-Team.Zen-Browser'; Default=$false }
 
-    [pscustomobject]@{ Category='Mensagens'; Name='WhatsApp'; Id='WhatsApp.WhatsApp'; Default=$false }
-    [pscustomobject]@{ Category='Mensagens'; Name='Telegram Desktop'; Id='Telegram.TelegramDesktop'; Default=$false }
-    [pscustomobject]@{ Category='Mensagens'; Name='Zoom'; Id='Zoom.Zoom'; Default=$false }
-    [pscustomobject]@{ Category='Mensagens'; Name='Discord'; Id='Discord.Discord'; Default=$false }
-    [pscustomobject]@{ Category='Mensagens'; Name='Microsoft Teams'; Id='Microsoft.Teams'; Default=$false }
-    [pscustomobject]@{ Category='Mensagens'; Name='Thunderbird'; Id='Mozilla.Thunderbird'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='Betterbird'; Id='Betterbird.Betterbird'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='Chatterino'; Id='ChatterinoTeam.Chatterino'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='Discord'; Id='Discord.Discord'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='Dorion'; Id='SpikeHD.Dorion'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='Element'; Id='Element.Element'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='Proton Mail'; Id='Proton.ProtonMail'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='QTox'; Id='Tox.qTox'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='Signal'; Id='OpenWhisperSystems.Signal'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='Slack'; Id='SlackTechnologies.Slack'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='Teams'; Id='Microsoft.Teams'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='TeamSpeak 3'; Id='TeamSpeakSystems.TeamSpeakClient'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='Telegram'; Id='Telegram.TelegramDesktop'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='Thunderbird'; Id='Mozilla.Thunderbird'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='Vesktop'; Id='Vencord.Vesktop'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='Viber'; Id='Rakuten.Viber'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='WhatsApp Desktop'; Id='msstore:9NKSQGP7F2NH'; Default=$false }
+    [pscustomobject]@{ Category='Comunicacao'; Name='Zoom'; Id='Zoom.Zoom'; Default=$false }
 
-    [pscustomobject]@{ Category='Nuvem e Torrent'; Name='Google Drive'; Id='Google.GoogleDrive'; Default=$false }
-    [pscustomobject]@{ Category='Nuvem e Torrent'; Name='Dropbox'; Id='Dropbox.Dropbox'; Default=$false }
-    [pscustomobject]@{ Category='Nuvem e Torrent'; Name='OneDrive'; Id='Microsoft.OneDrive'; Default=$false }
-    [pscustomobject]@{ Category='Nuvem e Torrent'; Name='qBittorrent'; Id='qBittorrent.qBittorrent'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='Adobe Acrobat Reader'; Id='Adobe.Acrobat.Reader.64-bit'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='AIMP (Music Player)'; Id='AIMP.AIMP'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='Audacity'; Id='Audacity.Audacity'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='Blender (3D Graphics)'; Id='BlenderFoundation.Blender'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='Calibre'; Id='calibre.calibre'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='EarTrumpet (Audio)'; Id='File-New-Project.EarTrumpet'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='GIMP (Image Editor)'; Id='GIMP.GIMP.3'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='HandBrake'; Id='HandBrake.HandBrake'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='ImageGlass (Image Viewer)'; Id='DuongDieuPhap.ImageGlass'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='IrfanView'; Id='IrfanSkiljan.IrfanView'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='iTunes'; Id='Apple.iTunes'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='K-Lite Codec Standard'; Id='CodecGuide.K-LiteCodecPack.Standard'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='LibreOffice'; Id='TheDocumentFoundation.LibreOffice'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='Media Player Classic - Home Cinema'; Id='clsid2.mpc-hc'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='mpc-qt'; Id='mpc-qt.mpc-qt'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='NAPS2 (Document Scanner)'; Id='Cyanfish.NAPS2'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='nomacs'; Id='nomacs.nomacs'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='Notepad++'; Id='Notepad++.Notepad++'; Default=$true  }
+    [pscustomobject]@{ Category='Multimidia'; Name='OBS Studio'; Id='OBSProject.OBSStudio'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='Obsidian'; Id='Obsidian.Obsidian'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='ONLYOFFICE Desktop'; Id='ONLYOFFICE.DesktopEditors'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='Paint.NET'; Id='dotPDN.PaintDotNet'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='ShareX (Screenshots)'; Id='ShareX.ShareX'; Default=$false }
+    [pscustomobject]@{ Category='Multimidia'; Name='VLC (Video Player)'; Id='VideoLAN.VLC'; Default=$true  }
 
-    [pscustomobject]@{ Category='Compactadores'; Name='7-Zip'; Id='7zip.7zip'; Default=$true }
-    [pscustomobject]@{ Category='Compactadores'; Name='WinRAR'; Id='RARLab.WinRAR'; Default=$false }
-    [pscustomobject]@{ Category='Compactadores'; Name='PeaZip'; Id='Giorgiotani.Peazip'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='1Password'; Id='AgileBits.1Password'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='7-Zip'; Id='7zip.7zip'; Default=$true  }
+    [pscustomobject]@{ Category='Utilitarios'; Name='AnyDesk'; Id='AnyDesk.AnyDesk'; Default=$true  }
+    [pscustomobject]@{ Category='Utilitarios'; Name='AutoHotkey'; Id='AutoHotkey.AutoHotkey'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Bitwarden'; Id='Bitwarden.Bitwarden'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='BlurAutoClicker'; Id='Blur009.BlurAutoClicker'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Bulk Crap Uninstaller'; Id='Klocman.BulkCrapUninstaller'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Crystal Disk Info'; Id='CrystalDewWorld.CrystalDiskInfo'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Crystal Disk Mark'; Id='CrystalDewWorld.CrystalDiskMark'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Deskflow'; Id='Deskflow.Deskflow'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Dropbox'; Id='Dropbox.Dropbox'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Ente Auth'; Id='ente-io.auth-desktop'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Everything'; Id='voidtools.Everything'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='F.lux'; Id='flux.flux'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Files'; Id='FilesCommunity.Files'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='GlazeWM'; Id='glzr-io.glazewm'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Google Drive'; Id='Google.GoogleDrive'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Hugo'; Id='Hugo.Hugo.Extended'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='HxD Hex Editor'; Id='MHNexus.HxD'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Internet Download Manager'; Id='Tonec.InternetDownloadManager'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='JPEG View'; Id='sylikc.JPEGView'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='KeePassXC'; Id='KeePassXCTeam.KeePassXC'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='MiniTool Partition Wizard'; Id='MiniTool.PartitionWizard.Free'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='MSEdgeRedirect'; Id='rcmaehl.MSEdgeRedirect'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='MSI Afterburner'; Id='Guru3D.Afterburner'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='NanaZip'; Id='M2Team.NanaZip'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Nilesoft Shell'; Id='Nilesoft.Shell'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='NVCleanstall'; Id='TechPowerUp.NVCleanstall'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='OFGB (Oh Frick Go Back)'; Id='xM4ddy.OFGB'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='OPAutoClicker'; Id='OPAutoClicker.OPAutoClicker'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='OpenRGB'; Id='OpenRGB.OpenRGB'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Oracle VirtualBox'; Id='Oracle.VirtualBox'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Parsec'; Id='Parsec.Parsec'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='PeaZip'; Id='Giorgiotani.Peazip'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Policy Plus'; Id='Fleex255.PolicyPlus'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Process Lasso'; Id='BitSum.ProcessLasso'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Proton Authenticator'; Id='Proton.ProtonAuthenticator'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Proton Drive'; Id='Proton.ProtonDrive'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Proton Pass'; Id='Proton.ProtonPass'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='qBittorrent'; Id='qBittorrent.qBittorrent'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Revo Uninstaller'; Id='RevoUninstaller.RevoUninstaller'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Rufus Imager'; Id='Rufus.Rufus'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='SignalRGB'; Id='WhirlwindFX.SignalRgb'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Snappy Driver Installer Origin'; Id='GlennDelahoy.SnappyDriverInstallerOrigin'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='StartAllBack'; Id='StartIsBack.StartAllBack'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='TeamViewer'; Id='TeamViewer.TeamViewer'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='TightVNC'; Id='GlavSoft.TightVNC'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Total Commander'; Id='Ghisler.TotalCommander'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='TranslucentTB'; Id='CharlesMilette.TranslucentTB'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='TreeSize Free'; Id='JAMSoftware.TreeSize.Free'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='UniGetUI'; Id='Devolutions.UniGetUI'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='WinRAR'; Id='RARLab.WinRAR'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='Wise Program Uninstaller (WiseCleaner)'; Id='WiseCleaner.WiseProgramUninstaller'; Default=$false }
+    [pscustomobject]@{ Category='Utilitarios'; Name='WizTree'; Id='AntibodySoftware.WizTree'; Default=$false }
 
-    [pscustomobject]@{ Category='Mídia'; Name='VLC'; Id='VideoLAN.VLC'; Default=$true }
-    [pscustomobject]@{ Category='Mídia'; Name='Spotify'; Id='Spotify.Spotify'; Default=$false }
-    [pscustomobject]@{ Category='Mídia'; Name='K-Lite Codec Pack'; Id='CodecGuide.K-LiteCodecPack.Standard'; Default=$false }
-    [pscustomobject]@{ Category='Mídia'; Name='Audacity'; Id='Audacity.Audacity'; Default=$false }
-    [pscustomobject]@{ Category='Mídia'; Name='HandBrake'; Id='HandBrake.HandBrake'; Default=$false }
-    [pscustomobject]@{ Category='Mídia'; Name='MusicBee'; Id='MusicBee.MusicBee'; Default=$false }
-    [pscustomobject]@{ Category='Mídia'; Name='AIMP'; Id='AIMP.AIMP'; Default=$false }
-    [pscustomobject]@{ Category='Mídia'; Name='foobar2000'; Id='PeterPawlowski.foobar2000'; Default=$false }
-    [pscustomobject]@{ Category='Mídia'; Name='GOM Player'; Id='GOMLab.GOMPlayer'; Default=$false }
-    [pscustomobject]@{ Category='Mídia'; Name='iTunes'; Id='Apple.iTunes'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='Advanced IP Scanner'; Id='Famatech.AdvancedIPScanner'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='Angry IP Scanner'; Id='angryziber.AngryIPScanner'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='Cinebench R23'; Id='Maxon.CinebenchR23'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='CPU-Z'; Id='CPUID.CPU-Z'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='Display Driver Uninstaller'; Id='Wagnardsoft.DisplayDriverUninstaller'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='GPU-Z'; Id='TechPowerUp.GPU-Z'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='gsudo'; Id='gerardog.gsudo'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='HWiNFO'; Id='REALiX.HWiNFO'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='HWMonitor'; Id='CPUID.HWMonitor'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='Mullvad VPN'; Id='MullvadVPN.MullvadVPN'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='Nmap'; Id='Insecure.Nmap'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='OpenVPN Connect'; Id='OpenVPNTechnologies.OpenVPNConnect'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='Proton VPN'; Id='Proton.ProtonVPN'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='PuTTY'; Id='PuTTY.PuTTY'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='Simplewall'; Id='Henry++.simplewall'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='Ventoy'; Id='Ventoy.Ventoy'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='WinSCP'; Id='WinSCP.WinSCP'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='WireGuard'; Id='WireGuard.WireGuard'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Pro'; Name='Wireshark'; Id='WiresharkFoundation.Wireshark'; Default=$false }
 
-    [pscustomobject]@{ Category='VC++ Redistributables'; Name='VC++ 2015+ x64'; Id='Microsoft.VCRedist.2015+.x64'; Default=$false }
-    [pscustomobject]@{ Category='VC++ Redistributables'; Name='VC++ 2015+ x86'; Id='Microsoft.VCRedist.2015+.x86'; Default=$false }
-    [pscustomobject]@{ Category='VC++ Redistributables'; Name='VC++ 2013 x64'; Id='Microsoft.VCRedist.2013.x64'; Default=$false }
-    [pscustomobject]@{ Category='VC++ Redistributables'; Name='VC++ 2013 x86'; Id='Microsoft.VCRedist.2013.x86'; Default=$false }
-    [pscustomobject]@{ Category='VC++ Redistributables'; Name='VC++ 2012 x64'; Id='Microsoft.VCRedist.2012.x64'; Default=$false }
-    [pscustomobject]@{ Category='VC++ Redistributables'; Name='VC++ 2012 x86'; Id='Microsoft.VCRedist.2012.x86'; Default=$false }
-    [pscustomobject]@{ Category='VC++ Redistributables'; Name='VC++ 2010 x64'; Id='Microsoft.VCRedist.2010.x64'; Default=$false }
-    [pscustomobject]@{ Category='VC++ Redistributables'; Name='VC++ 2010 x86'; Id='Microsoft.VCRedist.2010.x86'; Default=$false }
-    [pscustomobject]@{ Category='VC++ Redistributables'; Name='VC++ 2008 x64'; Id='Microsoft.VCRedist.2008.x64'; Default=$false }
-    [pscustomobject]@{ Category='VC++ Redistributables'; Name='VC++ 2008 x86'; Id='Microsoft.VCRedist.2008.x86'; Default=$false }
-    [pscustomobject]@{ Category='VC++ Redistributables'; Name='VC++ 2005 x64'; Id='Microsoft.VCRedist.2005.x64'; Default=$false }
-    [pscustomobject]@{ Category='VC++ Redistributables'; Name='VC++ 2005 x86'; Id='Microsoft.VCRedist.2005.x86'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='.NET Desktop Runtime 10'; Id='Microsoft.DotNet.DesktopRuntime.10'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='.NET Desktop Runtime 6'; Id='Microsoft.DotNet.DesktopRuntime.6'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='.NET Desktop Runtime 8'; Id='Microsoft.DotNet.DesktopRuntime.8'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='.NET Desktop Runtime 9'; Id='Microsoft.DotNet.DesktopRuntime.9'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='Autoruns'; Id='Microsoft.Sysinternals.Autoruns'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='DISMTools'; Id='CodingWondersSoftware.DISMTools.Stable'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='NTLite'; Id='Nlitesoft.NTLite'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='NuGet'; Id='Microsoft.NuGet'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='OneDrive'; Id='Microsoft.OneDrive'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='PowerShell'; Id='Microsoft.PowerShell'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='PowerToys'; Id='Microsoft.PowerToys'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='Process Explorer'; Id='Microsoft.Sysinternals.ProcessExplorer'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='Process Monitor'; Id='Microsoft.Sysinternals.ProcessMonitor'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='RDCMan'; Id='Microsoft.Sysinternals.RDCMan'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='TCPView'; Id='Microsoft.Sysinternals.TCPView'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='Visual C++ 2015-2022 32-bit'; Id='Microsoft.VCRedist.2015+.x86'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='Visual C++ 2015-2022 64-bit'; Id='Microsoft.VCRedist.2015+.x64'; Default=$false }
+    [pscustomobject]@{ Category='Ferramentas Microsoft'; Name='Windows Terminal'; Id='Microsoft.WindowsTerminal'; Default=$false }
 
-    [pscustomobject]@{ Category='.NET Runtimes'; Name='.NET Desktop Runtime 8 x64'; Id='Microsoft.DotNet.DesktopRuntime.8'; Arch='x64'; Default=$false }
-    [pscustomobject]@{ Category='.NET Runtimes'; Name='.NET Desktop Runtime 9 x64'; Id='Microsoft.DotNet.DesktopRuntime.9'; Arch='x64'; Default=$false }
-    [pscustomobject]@{ Category='.NET Runtimes'; Name='.NET Desktop Runtime 10 x64'; Id='Microsoft.DotNet.DesktopRuntime.10'; Arch='x64'; Default=$false }
-
-    [pscustomobject]@{ Category='Java'; Name='JRE Temurin 8 x64'; Id='EclipseAdoptium.Temurin.8.JRE'; Arch='x64'; Default=$false }
-    [pscustomobject]@{ Category='Java'; Name='JRE Temurin 11 x64'; Id='EclipseAdoptium.Temurin.11.JRE'; Arch='x64'; Default=$true }
-    [pscustomobject]@{ Category='Java'; Name='JRE Temurin 17 x64'; Id='EclipseAdoptium.Temurin.17.JRE'; Arch='x64'; Default=$false }
-    [pscustomobject]@{ Category='Java'; Name='JRE Temurin 21 x64'; Id='EclipseAdoptium.Temurin.21.JRE'; Arch='x64'; Default=$false }
-    [pscustomobject]@{ Category='Java'; Name='JDK Temurin 11 x64'; Id='EclipseAdoptium.Temurin.11.JDK'; Arch='x64'; Default=$false }
-    [pscustomobject]@{ Category='Java'; Name='JDK Temurin 17 x64'; Id='EclipseAdoptium.Temurin.17.JDK'; Arch='x64'; Default=$false }
-    [pscustomobject]@{ Category='Java'; Name='JDK Temurin 21 x64'; Id='EclipseAdoptium.Temurin.21.JDK'; Arch='x64'; Default=$false }
-
-    [pscustomobject]@{ Category='Imagem e Design'; Name='GIMP'; Id='GIMP.GIMP'; Default=$false }
-    [pscustomobject]@{ Category='Imagem e Design'; Name='Paint.NET'; Id='dotPDN.PaintDotNet'; Default=$false }
-    [pscustomobject]@{ Category='Imagem e Design'; Name='IrfanView'; Id='IrfanSkiljan.IrfanView'; Default=$false }
-    [pscustomobject]@{ Category='Imagem e Design'; Name='Krita'; Id='KDE.Krita'; Default=$false }
-    [pscustomobject]@{ Category='Imagem e Design'; Name='Inkscape'; Id='Inkscape.Inkscape'; Default=$false }
-    [pscustomobject]@{ Category='Imagem e Design'; Name='Blender'; Id='BlenderFoundation.Blender'; Default=$false }
-    [pscustomobject]@{ Category='Imagem e Design'; Name='ShareX'; Id='ShareX.ShareX'; Default=$false }
-    [pscustomobject]@{ Category='Imagem e Design'; Name='Greenshot'; Id='Greenshot.Greenshot'; Default=$false }
-    [pscustomobject]@{ Category='Imagem e Design'; Name='XnView Classic'; Id='XnSoft.XnView.Classic'; Default=$false }
-
-    [pscustomobject]@{ Category='Utilitários'; Name='AnyDesk'; Id='AnyDeskSoftwareGmbH.AnyDesk'; Default=$true }
-    [pscustomobject]@{ Category='Utilitários'; Name='TeamViewer'; Id='TeamViewer.TeamViewer'; Default=$false }
-    [pscustomobject]@{ Category='Utilitários'; Name='RustDesk'; Id='RustDesk.RustDesk'; Default=$false }
-    [pscustomobject]@{ Category='Utilitários'; Name='TeraCopy'; Id='CodeSector.TeraCopy'; Default=$false }
-    [pscustomobject]@{ Category='Utilitários'; Name='Everything'; Id='voidtools.Everything'; Default=$false }
-    [pscustomobject]@{ Category='Utilitários'; Name='Revo Uninstaller'; Id='RevoUninstaller.RevoUninstaller'; Default=$false }
-    [pscustomobject]@{ Category='Utilitários'; Name='WinDirStat'; Id='WinDirStat.WinDirStat'; Default=$false }
-    [pscustomobject]@{ Category='Utilitários'; Name='WizTree'; Id='AntibodySoftware.WizTree'; Default=$false }
-    [pscustomobject]@{ Category='Utilitários'; Name='CCleaner'; Id='Piriform.CCleaner'; Default=$false }
-    [pscustomobject]@{ Category='Utilitários'; Name='CPU-Z'; Id='CPUID.CPU-Z'; Default=$false }
-    [pscustomobject]@{ Category='Utilitários'; Name='HWiNFO'; Id='REALiX.HWiNFO'; Default=$false }
-    [pscustomobject]@{ Category='Utilitários'; Name='CrystalDiskInfo'; Id='CrystalDewWorld.CrystalDiskInfo'; Default=$false }
-    [pscustomobject]@{ Category='Utilitários'; Name='Open-Shell'; Id='Open-Shell.Open-Shell-Menu'; Default=$false }
-    [pscustomobject]@{ Category='Utilitários'; Name='KeePass 2'; Id='DominikReichl.KeePass'; Default=$false }
-    [pscustomobject]@{ Category='Utilitários'; Name='NVDA (leitor de tela)'; Id='NVAccess.NVDA'; Default=$false }
-
-    [pscustomobject]@{ Category='Documentos'; Name='Adobe Acrobat Reader'; Id='Adobe.Acrobat.Reader.64-bit'; Default=$false }
-    [pscustomobject]@{ Category='Documentos'; Name='Foxit PDF Reader'; Id='Foxit.FoxitReader'; Default=$false }
-    [pscustomobject]@{ Category='Documentos'; Name='SumatraPDF'; Id='SumatraPDF.SumatraPDF'; Default=$false }
-    [pscustomobject]@{ Category='Documentos'; Name='LibreOffice'; Id='TheDocumentFoundation.LibreOffice'; Default=$false }
-    [pscustomobject]@{ Category='Documentos'; Name='Apache OpenOffice'; Id='Apache.OpenOffice'; Default=$false }
-
-    [pscustomobject]@{ Category='Segurança'; Name='Malwarebytes'; Id='Malwarebytes.Malwarebytes'; Default=$false }
-    [pscustomobject]@{ Category='Segurança'; Name='AdwCleaner'; Id='Malwarebytes.AdwCleaner'; Default=$false }
-
-    [pscustomobject]@{ Category='Jogos'; Name='Steam'; Id='Valve.Steam'; Default=$false }
-    [pscustomobject]@{ Category='Jogos'; Name='Epic Games Launcher'; Id='EpicGames.EpicGamesLauncher'; Default=$false }
-
-    [pscustomobject]@{ Category='Desenvolvimento'; Name='Notepad++'; Id='Notepad++.Notepad++'; Default=$true }
-    [pscustomobject]@{ Category='Desenvolvimento'; Name='Visual Studio Code'; Id='Microsoft.VisualStudioCode'; Default=$false }
-    [pscustomobject]@{ Category='Desenvolvimento'; Name='Git'; Id='Git.Git'; Default=$false }
-    [pscustomobject]@{ Category='Desenvolvimento'; Name='Python 3.13'; Id='Python.Python.3.13'; Default=$false }
-    [pscustomobject]@{ Category='Desenvolvimento'; Name='Node.js LTS'; Id='OpenJS.NodeJS.LTS'; Default=$false }
-    [pscustomobject]@{ Category='Desenvolvimento'; Name='PowerShell 7'; Id='Microsoft.PowerShell'; Default=$false }
-    [pscustomobject]@{ Category='Desenvolvimento'; Name='Windows Terminal'; Id='Microsoft.WindowsTerminal'; Default=$false }
-    [pscustomobject]@{ Category='Desenvolvimento'; Name='FileZilla'; Id='TimKosse.FileZilla.Client'; Default=$false }
-    [pscustomobject]@{ Category='Desenvolvimento'; Name='WinSCP'; Id='WinSCP.WinSCP'; Default=$false }
-    [pscustomobject]@{ Category='Desenvolvimento'; Name='PuTTY'; Id='PuTTY.PuTTY'; Default=$false }
-    [pscustomobject]@{ Category='Desenvolvimento'; Name='WinMerge'; Id='WinMerge.WinMerge'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Amazon Corretto 21 (LTS)'; Id='Amazon.Corretto.21.JDK'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Amazon Corretto 25 (LTS)'; Id='Amazon.Corretto.25.JDK'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Amazon Corretto 8 (LTS)'; Id='Amazon.Corretto.8.JDK'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='ChatGPT Desktop'; Id='msstore:9NT1R1C2HH7J'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Claude Code'; Id='Anthropic.ClaudeCode'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Claude Desktop'; Id='Anthropic.Claude'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='CMake'; Id='Kitware.CMake'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Codex'; Id='OpenAI.Codex'; Default=$false }
     [pscustomobject]@{ Category='Desenvolvimento'; Name='Cursor'; Id='Anysphere.Cursor'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Git'; Id='Git.Git'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='GitHub Desktop'; Id='GitHub.GitHubDesktop'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Go'; Id='GoLang.Go'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Jetbrains Toolbox'; Id='JetBrains.Toolbox'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='JRE Temurin 11'; Id='EclipseAdoptium.Temurin.11.JRE'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='JRE Temurin 17'; Id='EclipseAdoptium.Temurin.17.JRE'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='JRE Temurin 21'; Id='EclipseAdoptium.Temurin.21.JRE'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='JRE Temurin 8'; Id='EclipseAdoptium.Temurin.8.JRE'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Lazygit'; Id='JesseDuffield.lazygit'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Lua'; Id='rjpcomputing.luaforwindows'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Neovim'; Id='Neovim.Neovim'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='NodeJS'; Id='OpenJS.NodeJS'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='NodeJS LTS'; Id='OpenJS.NodeJS.LTS'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Oh My Posh (Prompt)'; Id='JanDeDobbeleer.OhMyPosh'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='pnpm'; Id='pnpm.pnpm'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Python3'; Id='Python.Python.3.14'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Ruby'; Id='RubyInstallerTeam.Ruby.4.0'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Rust'; Id='Rustlang.Rust.MSVC'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Sublime Text'; Id='SublimeHQ.SublimeText.4'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='System Informer'; Id='WinsiderSS.SystemInformer'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Unity Game Engine'; Id='Unity.UnityHub'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='uv'; Id='astral-sh.uv'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Visual Studio 2022'; Id='Microsoft.VisualStudio.2022.Community'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Visual Studio 2026'; Id='Microsoft.VisualStudio.Community'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='VS Code'; Id='Microsoft.VisualStudioCode'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='VS Codium'; Id='VSCodium.VSCodium'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Yarn'; Id='Yarn.Yarn'; Default=$false }
+    [pscustomobject]@{ Category='Desenvolvimento'; Name='Zed'; Id='ZedIndustries.Zed'; Default=$false }
+
+    [pscustomobject]@{ Category='Jogos'; Name='Cemu'; Id='Cemu.Cemu'; Default=$false }
+    [pscustomobject]@{ Category='Jogos'; Name='EA App'; Id='ElectronicArts.EADesktop'; Default=$false }
+    [pscustomobject]@{ Category='Jogos'; Name='Epic Games Launcher'; Id='EpicGames.EpicGamesLauncher'; Default=$false }
+    [pscustomobject]@{ Category='Jogos'; Name='GeForce NOW'; Id='Nvidia.GeForceNow'; Default=$false }
+    [pscustomobject]@{ Category='Jogos'; Name='GOG Galaxy'; Id='GOG.Galaxy'; Default=$false }
+    [pscustomobject]@{ Category='Jogos'; Name='Heroic Games Launcher'; Id='HeroicGamesLauncher.HeroicGamesLauncher'; Default=$false }
+    [pscustomobject]@{ Category='Jogos'; Name='Itch.io'; Id='ItchIo.Itch'; Default=$false }
+    [pscustomobject]@{ Category='Jogos'; Name='Modrinth App'; Id='Modrinth.ModrinthApp'; Default=$false }
+    [pscustomobject]@{ Category='Jogos'; Name='Overwolf'; Id='Overwolf.CurseForge'; Default=$false }
+    [pscustomobject]@{ Category='Jogos'; Name='Playnite'; Id='Playnite.Playnite'; Default=$false }
+    [pscustomobject]@{ Category='Jogos'; Name='Prism Launcher'; Id='PrismLauncher.PrismLauncher'; Default=$false }
+    [pscustomobject]@{ Category='Jogos'; Name='Steam'; Id='Valve.Steam'; Default=$false }
+    [pscustomobject]@{ Category='Jogos'; Name='Ubisoft Connect'; Id='Ubisoft.Connect'; Default=$false }
+    [pscustomobject]@{ Category='Jogos'; Name='Virtual Desktop Streamer'; Id='VirtualDesktop.Streamer'; Default=$false }
+
+    [pscustomobject]@{ Category='Self-hosted'; Name='Jellyfin Media Player'; Id='Jellyfin.JellyfinMediaPlayer'; Default=$false }
+    [pscustomobject]@{ Category='Self-hosted'; Name='Jellyfin Server'; Id='Jellyfin.Server'; Default=$false }
+    [pscustomobject]@{ Category='Self-hosted'; Name='Kodi Media Center'; Id='XBMCFoundation.Kodi'; Default=$false }
+    [pscustomobject]@{ Category='Self-hosted'; Name='LocalSend'; Id='LocalSend.LocalSend'; Default=$false }
+    [pscustomobject]@{ Category='Self-hosted'; Name='Moonlight/GameStream Client'; Id='MoonlightGameStreamingProject.Moonlight'; Default=$false }
+    [pscustomobject]@{ Category='Self-hosted'; Name='NetBird'; Id='Netbird.Netbird'; Default=$false }
+    [pscustomobject]@{ Category='Self-hosted'; Name='Nextcloud Desktop'; Id='Nextcloud.NextcloudDesktop'; Default=$false }
+    [pscustomobject]@{ Category='Self-hosted'; Name='Plex Desktop'; Id='Plex.Plex'; Default=$false }
+    [pscustomobject]@{ Category='Self-hosted'; Name='Plex Media Server'; Id='Plex.PlexMediaServer'; Default=$false }
+    [pscustomobject]@{ Category='Self-hosted'; Name='Sunshine/GameStream Server'; Id='LizardByte.Sunshine'; Default=$false }
+
+    [pscustomobject]@{ Category='Backup e Seguranca'; Name='AdwCleaner'; Id='Malwarebytes.AdwCleaner'; Default=$false }
+    [pscustomobject]@{ Category='Backup e Seguranca'; Name='Hasleo Backup Suite Free'; Id='Hasleo.BackupSuite'; Default=$false }
+    [pscustomobject]@{ Category='Backup e Seguranca'; Name='Malwarebytes'; Id='Malwarebytes.Malwarebytes'; Default=$false }
 )
 
 # Chave única de cada pacote (Id + arquitetura quando houver)
@@ -1087,7 +1198,14 @@ function Invoke-GwtWingetWorker {
             $sync.StatusText = "Instalando $($pkg.Name) ($index de $($Selected.Count))..."
             Add-GwtLog "▶ [$index/$($Selected.Count)] $($pkg.Name) ($($pkg.Id))"
 
-            $wgArgs = @('install', '--id', [string]$pkg.Id, '-e', '--silent',
+            # IDs no formato "msstore:XXXX" vêm da Microsoft Store (não do repositório winget)
+            $pkgId = [string]$pkg.Id
+            $source = 'winget'
+            if ($pkgId -like 'msstore:*') {
+                $pkgId = $pkgId.Substring(8)
+                $source = 'msstore'
+            }
+            $wgArgs = @('install', '--id', $pkgId, '-e', '--silent', '--source', $source,
                         '--accept-source-agreements', '--accept-package-agreements', '--disable-interactivity')
             if ($pkg.PSObject.Properties.Name -contains 'Arch' -and -not [string]::IsNullOrWhiteSpace([string]$pkg.Arch)) {
                 $wgArgs += @('--architecture', [string]$pkg.Arch)
