@@ -350,6 +350,7 @@ $WinFeatures = @(
     [pscustomobject]@{ Key='NFS';        Name='Cliente NFS (Network File System)';          Features=@('ServicesForNFS-ClientOnly','ClientForNFS-Infrastructure','NFS-Administration'); Special='NFS'; Default=$false }
     [pscustomobject]@{ Key='LegacyMedia';Name='Componentes de mídia legados (WMP/DirectPlay)'; Features=@('WindowsMediaPlayer','MediaPlayback','DirectPlay','LegacyComponents'); Default=$false }
     [pscustomobject]@{ Key='TelnetClient';Name='Cliente Telnet';                            Features=@('TelnetClient'); Default=$false }
+    [pscustomobject]@{ Key='SSHServer';  Name='Servidor OpenSSH (acesso remoto por SSH)';   Features=@(); Special='SSHServer'; Default=$false }
     [pscustomobject]@{ Key='RegBackup';  Name='Backup diário do registro (00:30)';          Features=@(); Special='RegBackup'; Default=$false }
     [pscustomobject]@{ Key='LegacyF8';   Name='Recuperação por F8 (menu de boot legado)';   Features=@(); Special='LegacyF8'; Default=$false }
 )
@@ -1415,6 +1416,16 @@ function Invoke-GwtFeatureSpecial {
             Register-ScheduledTask -Action $action -Trigger $trigger -TaskName 'GeniusRegBackup' -Description 'Backup diário do registro' -User 'System' -Force | Out-Null
         }
         'LegacyF8' { & bcdedit.exe /set '{current}' bootmenupolicy legacy | Out-Null }
+        'SSHServer' {
+            Add-WindowsCapability -Online -Name 'OpenSSH.Server~~~~0.0.1.0' -ErrorAction Stop | Out-Null
+            Set-Service -Name sshd -StartupType Automatic -ErrorAction SilentlyContinue
+            Start-Service -Name sshd -ErrorAction SilentlyContinue
+            if (-not (Get-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -ErrorAction SilentlyContinue)) {
+                New-NetFirewallRule -Name 'OpenSSH-Server-In-TCP' -DisplayName 'OpenSSH Server (sshd)' `
+                    -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -ErrorAction SilentlyContinue | Out-Null
+            }
+            Add-GwtLog 'Servidor OpenSSH ativo (serviço sshd automático, porta 22 liberada no firewall).' 'Success'
+        }
     }
 }
 
