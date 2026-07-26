@@ -8,8 +8,11 @@ New-Item -ItemType Directory -Path (Join-Path $staging 'presets') -Force | Out-N
 
 Copy-Item (Join-Path $root 'GeniusToolkit.ps1')        $staging
 Copy-Item (Join-Path $root 'get.ps1')                  $staging
-Copy-Item (Join-Path $root 'Genius-Toolkit.bat')       $staging
-Copy-Item (Join-Path $root 'Genius-Toolkit-Admin.bat') $staging
+Copy-Item (Join-Path $root 'Genius-Toolkit.bat')        $staging
+Copy-Item (Join-Path $root 'Genius-Toolkit-Admin.bat')  $staging
+Copy-Item (Join-Path $root 'Criar-Atalho-Desktop.bat')  $staging
+New-Item -ItemType Directory -Path (Join-Path $staging 'tools') -Force | Out-Null
+Copy-Item (Join-Path $root 'tools\New-DesktopShortcut.ps1') (Join-Path $staging 'tools')
 Copy-Item (Join-Path $root 'README.md')                $staging
 Copy-Item (Join-Path $root 'LICENSE')                  $staging
 Copy-Item (Join-Path $root 'presets\*.json')           (Join-Path $staging 'presets')
