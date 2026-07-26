@@ -1,4 +1,15 @@
-# 🧞 Genius Windows Toolkit
+<p align="center">
+  <img src="assets/genius-info-logo.png" alt="Genius Info — Soluções em Tecnologia" width="440"/>
+</p>
+
+<h1 align="center">Genius Windows Toolkit</h1>
+
+<p align="center">
+  <em>Ferramenta de bancada para pós-formatação do Windows</em><br/>
+  <sub>por Ricardo Valério S. · Genius Info</sub>
+</p>
+
+---
 
 Utilitário PowerShell de bancada para **pós-formatação do Windows**, com interface gráfica moderna: todas as operações pesadas rodam em *runspaces* em segundo plano — a janela nunca congela — com log em tempo real, barra de progresso real e backup antes de qualquer alteração.
 
