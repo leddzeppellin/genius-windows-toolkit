@@ -16,10 +16,13 @@ $hook = @"
 `$AutoCloseTimer.Add_Tick({
     `$AutoCloseTimer.Stop()
     try {
-        if ($Tab -ge 0) { `$sync.Controls['MainTabs'].SelectedIndex = $Tab }
         `$Window.Topmost = `$true
         `$Window.Activate()
-        Start-Sleep -Milliseconds 400
+        # Deixa o WPF processar o layout/redesenho (Start-Sleep bloquearia a UI)
+        for (`$i = 0; `$i -lt 12; `$i++) {
+            [System.Windows.Threading.Dispatcher]::CurrentDispatcher.Invoke([Action]{}, [System.Windows.Threading.DispatcherPriority]::ContextIdle)
+            [System.Threading.Thread]::Sleep(60)
+        }
         Add-Type -AssemblyName System.Drawing, System.Windows.Forms
         `$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
         `$bmp = New-Object System.Drawing.Bitmap `$bounds.Width, `$bounds.Height
@@ -32,6 +35,7 @@ $hook = @"
     `$Window.Close()
 })
 `$AutoCloseTimer.Start()
+if ($Tab -ge 0) { `$sync.Controls['MainTabs'].SelectedIndex = $Tab }
 [void]`$Window.ShowDialog()
 "@
 
