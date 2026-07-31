@@ -23,6 +23,13 @@ if (Test-Path $assets) {
     Copy-Item (Join-Path $assets '*') (Join-Path $staging 'assets') -Recurse
 }
 
+# extras/ (Monitor de Internet) — permite instalar offline, do pendrive
+$extras = Join-Path $root 'extras'
+if (Test-Path $extras) {
+    New-Item -ItemType Directory -Path (Join-Path $staging 'extras') -Force | Out-Null
+    Copy-Item (Join-Path $extras '*') (Join-Path $staging 'extras') -Recurse
+}
+
 if (Test-Path $dest) { Remove-Item $dest -Force }
 Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $dest -Force
 Remove-Item $staging -Recurse -Force
