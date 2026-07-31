@@ -2679,6 +2679,100 @@ function Invoke-GwtIsoCleanWorker {
     }
 }
 
+# ============================================================================
+# Monitor de Internet — instala o coletor (Speedtest CLI + tarefa agendada) e
+# o painel local. Os arquivos vêm de extras\InternetMonitor (pendrive) ou do
+# GitHub quando o toolkit roda por "irm | iex".
+# ============================================================================
+
+function Get-GwtMonitorSource {
+    # Retorna a pasta com Install-InternetMonitor.ps1 (local ou baixada).
+    if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+        $local = Join-Path (Split-Path -Parent $PSCommandPath) 'extras\InternetMonitor'
+        if (Test-Path (Join-Path $local 'Install-InternetMonitor.ps1')) {
+            Add-GwtLog "Usando os arquivos locais: $local"
+            return $local
+        }
+    }
+
+    Add-GwtLog 'Arquivos locais não encontrados — baixando do GitHub...'
+    $base = 'https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/extras/InternetMonitor'
+    $files = @(
+        'Install-InternetMonitor.ps1', 'Uninstall-InternetMonitor.ps1',
+        'src/Collect-Internet.ps1', 'src/Open-Dashboard.ps1', 'src/Update-DashboardData.ps1',
+        'src/config.json', 'src/dashboard/index.html', 'src/dashboard/app.js',
+        'src/dashboard/styles.css', 'src/dashboard/data.js'
+    )
+    $tmp = Join-Path $env:TEMP ("GwtMonitor_" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    foreach ($rel in $files) {
+        $dest = Join-Path $tmp ($rel -replace '/', '\')
+        New-Item -ItemType Directory -Path (Split-Path $dest -Parent) -Force | Out-Null
+        Invoke-WebRequest -Uri "$base/$rel" -OutFile $dest -UseBasicParsing
+    }
+    Add-GwtLog "Arquivos baixados para: $tmp" 'Success'
+    return $tmp
+}
+
+function Invoke-GwtMonitorWorker {
+    param([string]$Action, [int]$IntervalMinutes = 60)
+
+    try {
+        $sync.Busy = $true
+        switch ($Action) {
+            'Install' {
+                $sync.StatusText = 'Instalando o Monitor de Internet...'
+                Add-GwtLog "================ MONITOR DE INTERNET: instalar (a cada $IntervalMinutes min) ================"
+                $src = Get-GwtMonitorSource
+                $installer = Join-Path $src 'Install-InternetMonitor.ps1'
+                if (-not (Test-Path $installer)) { throw 'Install-InternetMonitor.ps1 não encontrado.' }
+
+                Add-GwtLog 'Executando o instalador (a primeira medição pode levar alguns minutos)...'
+                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -IntervalMinutes $IntervalMinutes -DoNotOpenDashboard 2>&1 |
+                    ForEach-Object {
+                        $line = ([string]$_).Trim()
+                        if ($line) { Add-GwtLog "    $line" }
+                    }
+                if ($LASTEXITCODE -ne 0) { throw "O instalador retornou código $LASTEXITCODE." }
+
+                Add-GwtLog 'Monitor de Internet instalado. Atalho criado na Área de Trabalho.' 'Success'
+                Request-GwtUi @{ Action = 'Message'; Title = 'Monitor instalado'; Kind = 'Info'
+                                 Text = "Monitor de Internet instalado.`n`nColeta: a cada $IntervalMinutes minutos (como SYSTEM)`nHistórico: C:\InternetMonitor\data\historico-internet.csv`n`nUse 'Abrir painel' para ver os resultados." }
+            }
+            'Open' {
+                $sync.StatusText = 'Abrindo o painel...'
+                $opener = 'C:\InternetMonitor\Open-Dashboard.ps1'
+                if (-not (Test-Path $opener)) { throw 'O Monitor de Internet não está instalado nesta máquina.' }
+                Start-Process powershell.exe -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', $opener)
+                Add-GwtLog 'Painel do Monitor de Internet aberto no navegador.' 'Success'
+            }
+            'Uninstall' {
+                $sync.StatusText = 'Removendo o Monitor de Internet...'
+                Add-GwtLog '================ MONITOR DE INTERNET: desinstalar ================'
+                $src = Get-GwtMonitorSource
+                $uninstaller = Join-Path $src 'Uninstall-InternetMonitor.ps1'
+                if (-not (Test-Path $uninstaller)) { throw 'Uninstall-InternetMonitor.ps1 não encontrado.' }
+
+                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $uninstaller 2>&1 |
+                    ForEach-Object {
+                        $line = ([string]$_).Trim()
+                        if ($line) { Add-GwtLog "    $line" }
+                    }
+                Add-GwtLog 'Monitor removido. O histórico foi preservado em C:\InternetMonitor\data.' 'Success'
+                Request-GwtUi @{ Action = 'Message'; Title = 'Monitor removido'; Kind = 'Info'
+                                 Text = "Monitor de Internet desinstalado.`n`nO histórico foi preservado em:`nC:\InternetMonitor\data" }
+            }
+        }
+    }
+    catch {
+        Add-GwtLog "Falha no Monitor de Internet: $($_.Exception.Message)" 'Error'
+        Request-GwtUi @{ Action = 'Message'; Title = 'Erro no Monitor de Internet'; Text = $_.Exception.Message; Kind = 'Error' }
+    }
+    finally {
+        $sync.Busy = $false
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
 function Invoke-GwtDiagnosticWorker {
     try {
         $sync.Busy = $true
@@ -3513,6 +3607,7 @@ function Invoke-GwtRunspace {
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <Border Grid.Row="0" Style="{StaticResource Card}" Padding="14" Margin="0,0,0,12">
                                 <Grid>
@@ -3532,6 +3627,22 @@ function Invoke-GwtRunspace {
                             </Border>
                             <Border Grid.Row="1" Style="{StaticResource Card}" Padding="8">
                                 <TextBox Name="DiagnosticText" Style="{StaticResource Console}"/>
+                            </Border>
+                            <Border Grid.Row="2" Style="{StaticResource Card}" Padding="14" Margin="0,12,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="📡  Monitor de Internet" FontSize="18" FontWeight="Bold"/>
+                                    <TextBlock Text="Mede download, upload, ping, jitter e perda de pacotes de tempos em tempos (Speedtest CLI) e guarda o histórico num painel local. Roda sozinho como tarefa agendada." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,10"/>
+                                    <WrapPanel>
+                                        <TextBlock Text="Medir a cada" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,6,8"/>
+                                        <TextBox Name="MonitorIntervalBox" Text="60" Width="55" VerticalContentAlignment="Center" Margin="0,0,6,8" ToolTip="Intervalo em minutos (15 a 1440). Cada teste consome dados."/>
+                                        <TextBlock Text="minutos" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,14,8"/>
+                                        <Button Name="MonitorInstallButton" Style="{StaticResource GoldButton}" Content="📡  Instalar monitor" Margin="0,0,8,8"/>
+                                        <Button Name="MonitorOpenButton" Style="{StaticResource GhostButton}" Content="📊  Abrir painel" Margin="0,0,8,8"/>
+                                        <Button Name="MonitorUninstallButton" Style="{StaticResource GhostButton}" Content="🗑️  Desinstalar" Margin="0,0,14,8"/>
+                                        <CheckBox Name="MonitorPresetCheck" Content="Incluir no preset" VerticalAlignment="Center" Margin="0,0,0,8"
+                                                  ToolTip="Se marcado, o preset exportado lembra de instalar o monitor com este intervalo."/>
+                                    </WrapPanel>
+                                </StackPanel>
                             </Border>
                         </Grid>
                     </TabItem>
@@ -3893,6 +4004,10 @@ function Get-CurrentSelectionPreset {
         RemoveApps  = @(Get-CheckedTags -Panel $sync.Controls['AppxList'] -Property 'Id')
         Features    = @(Get-CheckedTags -Panel $sync.Controls['FeatureList'] -Property 'Key')
         Packages    = @((Get-SelectedPackages).Key)
+        InternetMonitor = [pscustomobject]@{
+            Install         = [bool]$sync.Controls['MonitorPresetCheck'].IsChecked
+            IntervalMinutes = $(if ([string]$sync.Controls['MonitorIntervalBox'].Text -as [int]) { [int][string]$sync.Controls['MonitorIntervalBox'].Text } else { 60 })
+        }
     }
 }
 
@@ -3944,6 +4059,12 @@ function Apply-PresetObject {
             }
         }
         Update-PackageCount
+    }
+    if ($PresetData.PSObject.Properties.Name -contains 'InternetMonitor' -and $PresetData.InternetMonitor) {
+        $mon = $PresetData.InternetMonitor
+        $sync.Controls['MonitorPresetCheck'].IsChecked = [bool]$mon.Install
+        if ($mon.IntervalMinutes) { $sync.Controls['MonitorIntervalBox'].Text = [string]$mon.IntervalMinutes }
+        if ([bool]$mon.Install) { Add-GwtLog 'Preset pede o Monitor de Internet — use "Instalar monitor" na aba Diagnóstico.' 'Info' }
     }
     Invalidate-Plan
     Add-GwtLog 'Preset aplicado às seleções.' 'Success'
@@ -4328,6 +4449,41 @@ $sync.Controls['DiagRunButton'].Add_Click({
     Invoke-GwtRunspace -ScriptBlock { Invoke-GwtDiagnosticWorker }
 })
 
+# ---- Monitor de Internet ----
+$sync.Controls['MonitorInstallButton'].Add_Click({
+    if ($sync.Busy) { return }
+    if (-not (Test-GwtAdmin)) {
+        [System.Windows.MessageBox]::Show($Window, 'Instalar o Monitor de Internet exige Administrador (cria uma tarefa agendada).', 'Administrador necessário', 'OK', 'Warning') | Out-Null
+        return
+    }
+    $interval = 60
+    if (-not [int]::TryParse([string]$sync.Controls['MonitorIntervalBox'].Text, [ref]$interval) -or $interval -lt 15 -or $interval -gt 1440) {
+        [System.Windows.MessageBox]::Show($Window, 'Informe um intervalo entre 15 e 1440 minutos.', 'Intervalo inválido', 'OK', 'Warning') | Out-Null
+        return
+    }
+    $msg = "Instalar o Monitor de Internet?`n`n• Mede a conexão a cada $interval minutos (Speedtest CLI)`n• Cria uma tarefa agendada que roda como SYSTEM`n• Guarda o histórico em C:\InternetMonitor`n• Cria um atalho do painel na Área de Trabalho`n`nA primeira medição roda agora e pode levar alguns minutos. Cada teste consome dados da sua franquia.`n`nContinuar?"
+    if ([System.Windows.MessageBox]::Show($Window, $msg, 'Instalar Monitor de Internet', 'YesNo', 'Question') -ne 'Yes') { return }
+    Invoke-GwtRunspace -ScriptBlock {
+        param($arg)
+        Invoke-GwtMonitorWorker -Action 'Install' -IntervalMinutes $arg.Interval
+    } -Argument @{ Interval = $interval }
+})
+
+$sync.Controls['MonitorOpenButton'].Add_Click({
+    if ($sync.Busy) { return }
+    Invoke-GwtRunspace -ScriptBlock { Invoke-GwtMonitorWorker -Action 'Open' }
+})
+
+$sync.Controls['MonitorUninstallButton'].Add_Click({
+    if ($sync.Busy) { return }
+    if (-not (Test-GwtAdmin)) {
+        [System.Windows.MessageBox]::Show($Window, 'Desinstalar o Monitor de Internet exige Administrador.', 'Administrador necessário', 'OK', 'Warning') | Out-Null
+        return
+    }
+    if ([System.Windows.MessageBox]::Show($Window, "Remover o Monitor de Internet?`n`nO histórico de medições é preservado em C:\InternetMonitor\data.", 'Desinstalar monitor', 'YesNo', 'Warning') -ne 'Yes') { return }
+    Invoke-GwtRunspace -ScriptBlock { Invoke-GwtMonitorWorker -Action 'Uninstall' }
+})
+
 # ---- Criar ISO (MicroWin) ----
 $sync.Controls['IsoBrowseButton'].Add_Click({
     $dialog = New-Object Microsoft.Win32.OpenFileDialog
@@ -4660,6 +4816,7 @@ $ActionButtons = @('AnalyzeButton', 'MigrateButton', 'CopyOnlyButton', 'NetworkR
                    'SystemRepairButton', 'UpdateResetButton', 'WingetFixButton', 'NtpFixButton',
                    'UpdateDefaultButton', 'UpdateSecurityButton', 'UpdateDisableButton',
                    'DnsApplyButton', 'PerfEnableButton', 'PerfDisableButton', 'DiagRunButton',
+                   'MonitorInstallButton', 'MonitorOpenButton', 'MonitorUninstallButton',
                    'IsoMountButton', 'IsoModifyButton', 'IsoExportButton', 'IsoCleanButton', 'IsoUsbWriteButton')
 
 $UiTimer = New-Object System.Windows.Threading.DispatcherTimer
@@ -4769,7 +4926,8 @@ if ($SmokeTest) {
                   'PreferencesList', 'PrivacyList', 'AppxList', 'FeatureList', 'DnsCombo',
                   'LegacyPanelList', 'IsoPathBox', 'IsoEditionCombo', 'IsoInjectDriversCheck',
                   'IsoSkipOobeCheck', 'IsoAccountBox', 'IsoUsbCombo', 'IsoUsbRefreshButton',
-                  'KitOpenButton', 'LogBox', 'Progress', 'StatusText') + $ActionButtons
+                  'KitOpenButton', 'MonitorIntervalBox', 'MonitorPresetCheck',
+                  'LogBox', 'Progress', 'StatusText') + $ActionButtons
     foreach ($name in $required) {
         if (-not $sync.Controls.ContainsKey($name) -or $null -eq $sync.Controls[$name]) { $issues += $name }
     }

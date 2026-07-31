@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Internet Monitor</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">MONITORAMENTO LOCAL</p>
+        <h1>Internet Monitor</h1>
+        <p id="freshness" class="muted">Carregando histórico…</p>
+      </div>
+      <div class="header-actions">
+        <span id="statusPill" class="pill neutral">Aguardando</span>
+        <a id="historyLink" class="refresh hidden" href="../data/historico-internet.csv" target="_blank" rel="noreferrer">Abrir CSV</a>
+        <button id="refreshButton" class="refresh" type="button">Atualizar</button>
+      </div>
+    </header>
+
+    <section id="emptyState" class="empty hidden">
+      <h2>Ainda não há medições</h2>
+      <p>A primeira coleta pode levar alguns minutos. Atualize o painel em seguida.</p>
+    </section>
+
+    <section id="dashboard" class="hidden">
+      <nav class="range-picker" aria-label="Período">
+        <button data-hours="24" class="active">24 horas</button>
+        <button data-hours="168">7 dias</button>
+        <button data-hours="720">30 dias</button>
+        <button data-hours="0">Tudo</button>
+      </nav>
+
+      <section class="metrics" aria-label="Última medição">
+        <article class="metric"><span>Download</span><strong id="downloadNow">—</strong><small>Mbps</small></article>
+        <article class="metric"><span>Upload</span><strong id="uploadNow">—</strong><small>Mbps</small></article>
+        <article class="metric"><span>Ping</span><strong id="pingNow">—</strong><small>ms</small></article>
+        <article class="metric"><span>Jitter</span><strong id="jitterNow">—</strong><small>ms</small></article>
+        <article class="metric"><span>Perda</span><strong id="lossNow">—</strong><small>%</small></article>
+      </section>
+
+      <section class="summary">
+        <article><span>Média de download</span><strong id="downloadAvg">—</strong></article>
+        <article><span>Média de upload</span><strong id="uploadAvg">—</strong></article>
+        <article><span>Disponibilidade das coletas</span><strong id="availability">—</strong></article>
+        <article><span>Testes no período</span><strong id="testCount">—</strong></article>
+      </section>
+
+      <section class="charts">
+        <article class="panel wide">
+          <div class="panel-title"><div><h2>Velocidade</h2><p>Download e upload em Mbps</p></div></div>
+          <div class="canvas-wrap"><canvas id="speedChart" aria-label="Histórico de download e upload"></canvas></div>
+          <div class="legend"><span><i class="download"></i>Download</span><span><i class="upload"></i>Upload</span></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><h2>Latência</h2><p>Ping e jitter em milissegundos</p></div></div>
+          <div class="canvas-wrap"><canvas id="latencyChart" aria-label="Histórico de ping e jitter"></canvas></div>
+          <div class="legend"><span><i class="ping"></i>Ping</span><span><i class="jitter"></i>Jitter</span></div>
+        </article>
+        <article class="panel">
+          <div class="panel-title"><div><h2>Perda de pacotes</h2><p>Percentual informado pelo teste</p></div></div>
+          <div class="canvas-wrap"><canvas id="lossChart" aria-label="Histórico de perda de pacotes"></canvas></div>
+          <div class="legend"><span><i class="loss"></i>Perda</span></div>
+        </article>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="panel-title">
+          <div><h2>Medições recentes</h2><p>Últimos resultados do período selecionado</p></div>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Data e hora</th><th>Download</th><th>Upload</th><th>Ping</th><th>Jitter</th><th>Perda</th><th>Servidor</th><th>Status</th></tr></thead>
+            <tbody id="historyBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -126,6 +126,18 @@ Gera uma ISO personalizada do Windows 11 a partir de uma imagem oficial, em quat
 
 > 🛡️ **Diferença importante**: ao contrário de outras ferramentas, a ISO gerada mantém o **Windows Update funcional** — não desativamos os serviços de atualização (evita entregar um sistema que nunca mais se atualiza). Requer Administrador, leva de 15 a 40 minutos e usa ~10 GB de disco temporário.
 
+## 📡 Monitor de Internet
+
+Na aba **Diagnóstico**, instala um monitor que mede a conexão sozinho de tempos em tempos usando o **Speedtest CLI da Ookla**:
+
+- Mede **download, upload, ping, jitter e perda de pacotes** no intervalo que você escolher (15 a 1440 minutos, padrão 60)
+- Roda como **tarefa agendada** sob a conta SYSTEM (não precisa de usuário logado nem senha)
+- Guarda o histórico em `C:\InternetMonitor\data\historico-internet.csv` e mostra tudo num **painel local** (atalho na Área de Trabalho)
+- Botões para **instalar**, **abrir o painel** e **desinstalar** (o histórico é preservado ao remover)
+- Pode ser marcado no **preset**, para lembrar de instalá-lo nas próximas máquinas
+
+Ótimo para diagnosticar reclamação de "internet lenta" em cliente: deixa medindo por alguns dias e depois mostra o gráfico. Os arquivos ficam em [`extras/InternetMonitor/`](extras/InternetMonitor).
+
 ## 🩺 Diagnóstico
 
 Relatório com Windows, hardware, volumes, pastas conhecidas do perfil, adaptadores e perfis de rede — salvo em `%LOCALAPPDATA%\GeniusWindowsToolkit\reports`.

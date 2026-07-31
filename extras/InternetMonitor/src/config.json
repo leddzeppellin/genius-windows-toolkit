@@ -1,0 +1,9 @@
+{
+  "downloadMinMbps": 500,
+  "uploadMinMbps": 500,
+  "pingMaxMs": 50,
+  "jitterMaxMs": 20,
+  "packetLossMaxPct": 1,
+  "collectionIntervalMinutes": 60,
+  "staleAfterMinutes": 150
+}
