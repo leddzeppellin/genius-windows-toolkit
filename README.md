@@ -92,6 +92,13 @@ Catálogo amplo (mais de 200 programas) organizado em categorias: Navegadores, C
 - **Kit offline** — baixa os instaladores dos programas marcados para uma pasta `GeniusOfflineKit\` (ao lado do app, no pendrive) e salva um perfil `kit.json`. Depois, em qualquer máquina **sem internet**, o botão **Instalar do kit offline** invoca os instaladores locais em modo silencioso. Perfeito para montar um kit de bancada uma vez e reusar offline.
 - **Verificar atualizações do kit** — compara a versão baixada de cada programa com a mais recente do winget, lista o que mudou (`v1.2 → v1.5`) e, se você confirmar, **baixa e substitui** só os instaladores desatualizados, mantendo o kit sempre em dia.
 
+## 🛡️ Segurança das operações
+
+- **Ponto de restauração automático** antes de aplicar Ajustes, Privacidade, Rede, Recursos, políticas de Windows Update e remoção de apps. Pode ser desligado no botão da barra lateral (com aviso no log).
+- **Backup `.reg`** das chaves afetadas antes de cada alteração de registro.
+- **Cancelar** uma operação em andamento: o botão aparece na barra de status e interrompe o processo após concluir o item atual.
+- **Descrição em cada item**: passe o mouse sobre qualquer ajuste, item de privacidade, ação de rede, recurso do Windows ou opção da ISO para ver exatamente o que ele faz e quais os riscos.
+
 ## ⚙️ Ajustes
 
 Preferências reversíveis de interface e sistema, em grade por categoria: extensões e arquivos ocultos, Explorer em "Este Computador", menu clássico do Windows 11, histórico da área de transferência (Win+V), modo escuro, barras de rolagem sempre visíveis, ajustes da barra de tarefas (alinhamento, botões, porcentagem da bateria), remover Bing da busca, ocultar "Recomendados" do Iniciar, logon verboso, BSoD detalhado, caminhos longos, pular tela de bloqueio, Num Lock ao iniciar, desativar aceleração do mouse e Teclas de Aderência, Game Mode, Outlook clássico e desativar inicialização rápida — sempre com backup `.reg` antes.

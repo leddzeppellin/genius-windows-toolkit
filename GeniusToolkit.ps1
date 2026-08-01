@@ -124,43 +124,43 @@ $KnownFolders = @(
 
 # Aba Rede — funcionalidade integral preservada do BAT original de compartilhamento.
 $NetworkActions = @(
-    [pscustomobject]@{ Key='NetBios';    Name='Ativar NetBIOS sobre TCP/IP';               Risk='Compatibilidade'; Default=$true  }
-    [pscustomobject]@{ Key='Smb1';       Name='Ativar SMB 1.0/CIFS';                       Risk='Alto';            Default=$false }
-    [pscustomobject]@{ Key='SmbGuest';   Name='Permitir logon convidado inseguro SMB';     Risk='Alto';            Default=$true  }
-    [pscustomobject]@{ Key='Private';    Name='Definir redes atuais como Particular';      Risk='Baixo';           Default=$true  }
-    [pscustomobject]@{ Key='NoPassword'; Name='Ajustar compartilhamento sem senha (LSA)';  Risk='Médio';           Default=$true  }
-    [pscustomobject]@{ Key='Firewall';   Name='Liberar descoberta e compartilhamento';     Risk='Baixo';           Default=$true  }
-    [pscustomobject]@{ Key='Services';   Name='Serviços de compartilhamento automáticos';  Risk='Baixo';           Default=$true  }
-    [pscustomobject]@{ Key='ResetStack'; Name='Limpar DNS e resetar pilha TCP/IP';         Risk='Requer reboot';   Default=$true  }
-    [pscustomobject]@{ Key='Winsock';    Name='Resetar Winsock (netsh winsock reset)';     Risk='Requer reboot';   Default=$false }
+    [pscustomobject]@{ Key='NetBios';    Name='Ativar NetBIOS sobre TCP/IP';               Risk='Compatibilidade'; Default=$true; Desc='Liga o NetBIOS sobre TCP/IP nos adaptadores ativos. Necessário para ver máquinas antigas na rede local (nomes NetBIOS).' }
+    [pscustomobject]@{ Key='Smb1';       Name='Ativar SMB 1.0/CIFS';                       Risk='Alto';            Default=$false; Desc='Ativa o protocolo SMB 1.0/CIFS. RISCO ALTO: é obsoleto e vulnerável (WannaCry). Use só para NAS/DVR/impressoras muito antigos.' }
+    [pscustomobject]@{ Key='SmbGuest';   Name='Permitir logon convidado inseguro SMB';     Risk='Alto';            Default=$true; Desc='Permite acessar compartilhamentos sem usuário e senha e desativa a exigência de assinatura SMB. RISCO ALTO em rede não confiável.' }
+    [pscustomobject]@{ Key='Private';    Name='Definir redes atuais como Particular';      Risk='Baixo';           Default=$true; Desc='Marca as redes conectadas como Particular, o que libera a descoberta de rede e o compartilhamento no Windows.' }
+    [pscustomobject]@{ Key='NoPassword'; Name='Ajustar compartilhamento sem senha (LSA)';  Risk='Médio';           Default=$true; Desc='Ajusta chaves LSA para permitir acesso anônimo a compartilhamentos. Necessário para o clássico "compartilhar sem senha".' }
+    [pscustomobject]@{ Key='Firewall';   Name='Liberar descoberta e compartilhamento';     Risk='Baixo';           Default=$true; Desc='Habilita as regras de firewall de Descoberta de Rede e Compartilhamento de Arquivos, usando os grupos nativos do Windows.' }
+    [pscustomobject]@{ Key='Services';   Name='Serviços de compartilhamento automáticos';  Risk='Baixo';           Default=$true; Desc='Coloca os serviços de compartilhamento (Workstation, Server, fdPHost, FDResPub) em Automático e os inicia.' }
+    [pscustomobject]@{ Key='ResetStack'; Name='Limpar DNS e resetar pilha TCP/IP';         Risk='Requer reboot';   Default=$true; Desc='Limpa o cache DNS e reseta a pilha TCP/IP. Resolve muitos problemas de conexão. Exige reinício.' }
+    [pscustomobject]@{ Key='Winsock';    Name='Resetar Winsock (netsh winsock reset)';     Risk='Requer reboot';   Default=$false; Desc='Reseta o catálogo Winsock, usado quando um programa (VPN/antivírus) corrompeu a pilha de rede. Exige reinício.' }
 )
 
 # Preferências (aba Ajustes) — cada item aplica um valor benéfico; dados em $sync.OpData.
 $Preferences = @(
-    [pscustomobject]@{ Key='ShowExtensions';    Name='Mostrar extensões de arquivos';               Cat='Explorador';        Default=$true  }
-    [pscustomobject]@{ Key='ShowHidden';        Name='Mostrar arquivos ocultos';                    Cat='Explorador';        Default=$false }
-    [pscustomobject]@{ Key='ThisPc';            Name='Abrir Explorer em "Este Computador"';         Cat='Explorador';        Default=$true  }
-    [pscustomobject]@{ Key='ClassicMenu';       Name='Menu de contexto clássico (Windows 11)';      Cat='Explorador';        Default=$false }
-    [pscustomobject]@{ Key='Clipboard';         Name='Histórico da área de transferência (Win+V)';  Cat='Sistema';           Default=$true  }
-    [pscustomobject]@{ Key='DarkMode';          Name='Modo escuro do Windows';                      Cat='Aparência';         Default=$false }
-    [pscustomobject]@{ Key='Scrollbars';        Name='Barras de rolagem sempre visíveis';           Cat='Aparência';         Default=$false }
-    [pscustomobject]@{ Key='TaskbarLeft';       Name='Barra de tarefas à esquerda (Win 11)';        Cat='Barra de tarefas';  Default=$false }
-    [pscustomobject]@{ Key='HideTaskView';      Name='Ocultar botão "Visão de tarefas"';            Cat='Barra de tarefas';  Default=$false }
-    [pscustomobject]@{ Key='HideSearchBox';     Name='Ocultar caixa de busca da barra';             Cat='Barra de tarefas';  Default=$false }
-    [pscustomobject]@{ Key='EndTask';           Name='Botão "Finalizar tarefa" na barra';           Cat='Barra de tarefas';  Default=$false }
-    [pscustomobject]@{ Key='BatteryPercentage'; Name='Porcentagem da bateria na bandeja';           Cat='Barra de tarefas';  Default=$false }
-    [pscustomobject]@{ Key='NoBingSearch';      Name='Remover Bing da busca do Iniciar';            Cat='Iniciar e busca';   Default=$false }
-    [pscustomobject]@{ Key='StartNoRecommend';  Name='Ocultar "Recomendados" do Iniciar';           Cat='Iniciar e busca';   Default=$false }
-    [pscustomobject]@{ Key='VerboseLogon';      Name='Mensagens detalhadas no logon';               Cat='Sistema';           Default=$false }
-    [pscustomobject]@{ Key='DetailedBSoD';      Name='Tela azul (BSoD) detalhada';                  Cat='Sistema';           Default=$false }
-    [pscustomobject]@{ Key='LongPaths';         Name='Permitir caminhos longos (>260 caracteres)';  Cat='Sistema';           Default=$false }
-    [pscustomobject]@{ Key='DisableLockscreen'; Name='Pular tela de bloqueio';                      Cat='Sistema';           Default=$false }
-    [pscustomobject]@{ Key='FastStartup';       Name='Desativar inicialização rápida';              Cat='Sistema';           Default=$false }
-    [pscustomobject]@{ Key='NumLock';           Name='Num Lock ligado ao iniciar';                  Cat='Teclado e mouse';   Default=$false }
-    [pscustomobject]@{ Key='DisableMouseAccel'; Name='Desativar aceleração do mouse';               Cat='Teclado e mouse';   Default=$false }
-    [pscustomobject]@{ Key='DisableStickyKeys'; Name='Desativar Teclas de Aderência';               Cat='Teclado e mouse';   Default=$false }
-    [pscustomobject]@{ Key='GameMode';          Name='Ativar Game Mode';                            Cat='Desempenho e apps'; Default=$false }
-    [pscustomobject]@{ Key='ClassicOutlook';    Name='Forçar Outlook clássico';                     Cat='Desempenho e apps'; Default=$false }
+    [pscustomobject]@{ Key='ShowExtensions';    Name='Mostrar extensões de arquivos';               Cat='Explorador';        Default=$true; Desc='Mostra a extensão dos arquivos (.exe, .pdf). Importante para segurança: revela arquivos disfarçados como "foto.jpg.exe".' }
+    [pscustomobject]@{ Key='ShowHidden';        Name='Mostrar arquivos ocultos';                    Cat='Explorador';        Default=$false; Desc='Exibe arquivos e pastas ocultos no Explorer.' }
+    [pscustomobject]@{ Key='ThisPc';            Name='Abrir Explorer em "Este Computador"';         Cat='Explorador';        Default=$true; Desc='Faz o Explorer abrir em "Este Computador" (com os discos) em vez de "Acesso rápido".' }
+    [pscustomobject]@{ Key='ClassicMenu';       Name='Menu de contexto clássico (Windows 11)';      Cat='Explorador';        Default=$false; Desc='Restaura o menu de contexto completo do Windows 10 ao clicar com o botão direito, sem o "Mostrar mais opções".' }
+    [pscustomobject]@{ Key='Clipboard';         Name='Histórico da área de transferência (Win+V)';  Cat='Sistema';           Default=$true; Desc='Ativa o histórico da área de transferência: Win+V mostra os últimos itens copiados.' }
+    [pscustomobject]@{ Key='DarkMode';          Name='Modo escuro do Windows';                      Cat='Aparência';         Default=$false; Desc='Aplica o tema escuro no Windows e nos aplicativos.' }
+    [pscustomobject]@{ Key='Scrollbars';        Name='Barras de rolagem sempre visíveis';           Cat='Aparência';         Default=$false; Desc='Mantém as barras de rolagem sempre visíveis, em vez de encolherem quando paradas.' }
+    [pscustomobject]@{ Key='TaskbarLeft';       Name='Barra de tarefas à esquerda (Win 11)';        Cat='Barra de tarefas';  Default=$false; Desc='Alinha os ícones da barra de tarefas à esquerda, como no Windows 10.' }
+    [pscustomobject]@{ Key='HideTaskView';      Name='Ocultar botão "Visão de tarefas"';            Cat='Barra de tarefas';  Default=$false; Desc='Remove o botão de Visão de Tarefas da barra (o atalho Win+Tab continua funcionando).' }
+    [pscustomobject]@{ Key='HideSearchBox';     Name='Ocultar caixa de busca da barra';             Cat='Barra de tarefas';  Default=$false; Desc='Remove a caixa/ícone de pesquisa da barra de tarefas, liberando espaço.' }
+    [pscustomobject]@{ Key='EndTask';           Name='Botão "Finalizar tarefa" na barra';           Cat='Barra de tarefas';  Default=$false; Desc='Adiciona "Finalizar tarefa" ao clicar com o botão direito num app da barra, para fechar travados sem o Gerenciador.' }
+    [pscustomobject]@{ Key='BatteryPercentage'; Name='Porcentagem da bateria na bandeja';           Cat='Barra de tarefas';  Default=$false; Desc='Mostra a porcentagem da bateria ao lado do ícone, em notebooks.' }
+    [pscustomobject]@{ Key='NoBingSearch';      Name='Remover Bing da busca do Iniciar';            Cat='Iniciar e busca';   Default=$false; Desc='Impede que a busca do menu Iniciar consulte a web pelo Bing, deixando a pesquisa local mais rápida.' }
+    [pscustomobject]@{ Key='StartNoRecommend';  Name='Ocultar "Recomendados" do Iniciar';           Cat='Iniciar e busca';   Default=$false; Desc='Oculta a seção "Recomendados" do menu Iniciar (arquivos e apps sugeridos).' }
+    [pscustomobject]@{ Key='VerboseLogon';      Name='Mensagens detalhadas no logon';               Cat='Sistema';           Default=$false; Desc='Mostra mensagens detalhadas do que o Windows está fazendo ao ligar e desligar. Ajuda a diagnosticar lentidão no boot.' }
+    [pscustomobject]@{ Key='DetailedBSoD';      Name='Tela azul (BSoD) detalhada';                  Cat='Sistema';           Default=$false; Desc='Faz a tela azul exibir os detalhes técnicos do erro em vez de só a carinha triste. Útil para diagnóstico.' }
+    [pscustomobject]@{ Key='LongPaths';         Name='Permitir caminhos longos (>260 caracteres)';  Cat='Sistema';           Default=$false; Desc='Permite caminhos com mais de 260 caracteres. Evita erros ao copiar pastas com nomes muito longos.' }
+    [pscustomobject]@{ Key='DisableLockscreen'; Name='Pular tela de bloqueio';                      Cat='Sistema';           Default=$false; Desc='Pula a tela de bloqueio (aquela com a foto) e vai direto para a tela de senha.' }
+    [pscustomobject]@{ Key='FastStartup';       Name='Desativar inicialização rápida';              Cat='Sistema';           Default=$false; Desc='Desliga a inicialização rápida (hibernação parcial). Recomendado em dual boot e quando o PC não desliga direito.' }
+    [pscustomobject]@{ Key='NumLock';           Name='Num Lock ligado ao iniciar';                  Cat='Teclado e mouse';   Default=$false; Desc='Deixa o Num Lock ligado já na tela de login.' }
+    [pscustomobject]@{ Key='DisableMouseAccel'; Name='Desativar aceleração do mouse';               Cat='Teclado e mouse';   Default=$false; Desc='Remove a aceleração do ponteiro: o cursor passa a seguir o movimento físico do mouse. Preferido para jogos e precisão.' }
+    [pscustomobject]@{ Key='DisableStickyKeys'; Name='Desativar Teclas de Aderência';               Cat='Teclado e mouse';   Default=$false; Desc='Desativa as Teclas de Aderência, evitando o aviso ao apertar Shift cinco vezes.' }
+    [pscustomobject]@{ Key='GameMode';          Name='Ativar Game Mode';                            Cat='Desempenho e apps'; Default=$false; Desc='Ativa o Modo Jogo, que prioriza recursos para o jogo em primeiro plano.' }
+    [pscustomobject]@{ Key='ClassicOutlook';    Name='Forçar Outlook clássico';                     Cat='Desempenho e apps'; Default=$false; Desc='Força o uso do Outlook clássico em vez do novo Outlook.' }
 )
 
 # Catálogo winget curado — IDs validados, sem duplicatas nem pacotes mortos.
@@ -396,37 +396,36 @@ foreach ($pkg in $Packages) {
 
 # --- Privacidade e limpeza (aba Privacidade) ---
 $PrivacyTweaks = @(
-    [pscustomobject]@{ Key='Telemetry';        Name='Desativar telemetria da Microsoft';                 Cat='Essencial'; Default=$true  }
-    [pscustomobject]@{ Key='ActivityHistory';  Name='Desativar histórico de atividades';                 Cat='Essencial'; Default=$true  }
-    [pscustomobject]@{ Key='ConsumerFeatures'; Name='Desativar recursos de consumidor (sugestões)';      Cat='Essencial'; Default=$true  }
-    [pscustomobject]@{ Key='DeliveryOpt';      Name='Desativar Delivery Optimization';                   Cat='Essencial'; Default=$true  }
-    [pscustomobject]@{ Key='Location';         Name='Desativar rastreamento de localização';             Cat='Essencial'; Default=$true  }
-    [pscustomobject]@{ Key='BackgroundApps';   Name='Desativar apps em segundo plano';                   Cat='Essencial'; Default=$false }
-    [pscustomobject]@{ Key='Hibernation';      Name='Desativar hibernação (libera espaço)';              Cat='Essencial'; Default=$false }
-    [pscustomobject]@{ Key='Widgets';          Name='Remover Widgets da barra de tarefas';               Cat='Essencial'; Default=$false }
-    [pscustomobject]@{ Key='WPBT';             Name='Desativar WPBT (segurança de firmware)';            Cat='Essencial'; Default=$false }
-    [pscustomobject]@{ Key='DeviceCompanion';  Name='Bloquear apps complementares de dispositivos';      Cat='Essencial'; Default=$false }
-    [pscustomobject]@{ Key='ServicesManual';   Name='Serviços não essenciais para Manual';               Cat='Essencial'; Default=$false }
-    [pscustomobject]@{ Key='StoreSearch';      Name='Bloquear recomendações da Store na busca';          Cat='Essencial'; Default=$false }
-    [pscustomobject]@{ Key='ExplorerDiscovery';Name='Desativar descoberta automática de pastas';         Cat='Essencial'; Default=$false }
-    [pscustomobject]@{ Key='DiskCleanup';      Name='Executar Limpeza de Disco';                         Cat='Essencial'; Default=$false }
-    [pscustomobject]@{ Key='DeleteTemp';       Name='Apagar arquivos temporários';                       Cat='Essencial'; Default=$false }
-
-    [pscustomobject]@{ Key='EdgeDebloat';      Name='Debloat do Microsoft Edge';                         Cat='Avançado (cuidado)'; Default=$false }
-    [pscustomobject]@{ Key='RemoveEdge';       Name='Remover Microsoft Edge';                            Cat='Avançado (cuidado)'; Default=$false }
-    [pscustomobject]@{ Key='RemoveOneDrive';   Name='Remover OneDrive';                                  Cat='Avançado (cuidado)'; Default=$false }
-    [pscustomobject]@{ Key='WindowsAI';        Name='Desativar e remover IA (Copilot/Recall)';           Cat='Avançado (cuidado)'; Default=$false }
-    [pscustomobject]@{ Key='VisualEffects';    Name='Efeitos visuais para melhor desempenho';            Cat='Avançado (cuidado)'; Default=$false }
-    [pscustomobject]@{ Key='StorageSense';     Name='Desativar Sensor de Armazenamento';                 Cat='Avançado (cuidado)'; Default=$false }
-    [pscustomobject]@{ Key='Notifications';    Name='Desativar notificações e calendário da bandeja';    Cat='Avançado (cuidado)'; Default=$false }
-    [pscustomobject]@{ Key='ReservedStorage';  Name='Desativar Armazenamento Reservado';                 Cat='Avançado (cuidado)'; Default=$false }
-    [pscustomobject]@{ Key='UTCTime';          Name='Relógio em UTC (dual boot com Linux)';              Cat='Avançado (cuidado)'; Default=$false }
-    [pscustomobject]@{ Key='HomeGallery';      Name='Remover Início e Galeria do Explorer';              Cat='Avançado (cuidado)'; Default=$false }
-    [pscustomobject]@{ Key='IPv4Preferred';    Name='Preferir IPv4 sobre IPv6';                          Cat='Avançado (cuidado)'; Default=$false }
-    [pscustomobject]@{ Key='Teredo';           Name='Desativar Teredo';                                  Cat='Avançado (cuidado)'; Default=$false }
-    [pscustomobject]@{ Key='DisableIPv6';      Name='Desativar IPv6 completamente';                      Cat='Avançado (cuidado)'; Default=$false }
-    [pscustomobject]@{ Key='RazerBlock';       Name='Bloquear auto-instalação de software Razer';        Cat='Avançado (cuidado)'; Default=$false }
-    [pscustomobject]@{ Key='BraveDebloat';     Name='Debloat do navegador Brave';                        Cat='Avançado (cuidado)'; Default=$false }
+    [pscustomobject]@{ Key='Telemetry';        Name='Desativar telemetria da Microsoft';                 Cat='Essencial'; Default=$true; Desc='Desativa a coleta de dados de diagnóstico da Microsoft, ID de anúncios, reconhecimento de escrita/voz e o serviço DiagTrack.' }
+    [pscustomobject]@{ Key='ActivityHistory';  Name='Desativar histórico de atividades';                 Cat='Essencial'; Default=$true; Desc='Impede o Windows de guardar e enviar seu histórico de atividades (documentos e apps usados).' }
+    [pscustomobject]@{ Key='ConsumerFeatures'; Name='Desativar recursos de consumidor (sugestões)';      Cat='Essencial'; Default=$true; Desc='Bloqueia a instalação automática de apps promovidos (jogos e "sugestões") que aparecem no menu Iniciar.' }
+    [pscustomobject]@{ Key='DeliveryOpt';      Name='Desativar Delivery Optimization';                   Cat='Essencial'; Default=$true; Desc='Impede que seu PC use a banda para distribuir atualizações do Windows a outros computadores da internet.' }
+    [pscustomobject]@{ Key='Location';         Name='Desativar rastreamento de localização';             Cat='Essencial'; Default=$true; Desc='Desativa o serviço e a permissão de localização do Windows.' }
+    [pscustomobject]@{ Key='BackgroundApps';   Name='Desativar apps em segundo plano';                   Cat='Essencial'; Default=$false; Desc='Impede que apps da Store rodem em segundo plano, economizando memória e bateria.' }
+    [pscustomobject]@{ Key='Hibernation';      Name='Desativar hibernação (libera espaço)';              Cat='Essencial'; Default=$false; Desc='Desativa a hibernação e apaga o hiberfil.sys, liberando vários GB. Também desliga a inicialização rápida.' }
+    [pscustomobject]@{ Key='Widgets';          Name='Remover Widgets da barra de tarefas';               Cat='Essencial'; Default=$false; Desc='Remove os Widgets (painel de notícias/clima) da barra de tarefas.' }
+    [pscustomobject]@{ Key='WPBT';             Name='Desativar WPBT (segurança de firmware)';            Cat='Essencial'; Default=$false; Desc='Impede que a BIOS/UEFI do fabricante injete programas no Windows a cada boot (usado por alguns fabricantes para reinstalar bloatware).' }
+    [pscustomobject]@{ Key='DeviceCompanion';  Name='Bloquear apps complementares de dispositivos';      Cat='Essencial'; Default=$false; Desc='Evita que o Windows baixe apps "complementares" ao conectar dispositivos (ex.: anúncio ao plugar um monitor).' }
+    [pscustomobject]@{ Key='ServicesManual';   Name='Serviços não essenciais para Manual';               Cat='Essencial'; Default=$false; Desc='Coloca serviços não essenciais em Manual/Desativado (DiagTrack, Mapas, etc.) e agrupa processos svchost para reduzir consumo.' }
+    [pscustomobject]@{ Key='StoreSearch';      Name='Bloquear recomendações da Store na busca';          Cat='Essencial'; Default=$false; Desc='Impede que a busca do Iniciar sugira aplicativos da Microsoft Store.' }
+    [pscustomobject]@{ Key='ExplorerDiscovery';Name='Desativar descoberta automática de pastas';         Cat='Essencial'; Default=$false; Desc='Impede o Explorer de adivinhar o tipo de cada pasta (deixa a navegação mais rápida). ATENÇÃO: desativa o agrupamento por tipo.' }
+    [pscustomobject]@{ Key='DiskCleanup';      Name='Executar Limpeza de Disco';                         Cat='Essencial'; Default=$false; Desc='Executa a Limpeza de Disco e remove componentes antigos de atualizações do Windows. Pode demorar bastante.' }
+    [pscustomobject]@{ Key='DeleteTemp';       Name='Apagar arquivos temporários';                       Cat='Essencial'; Default=$false; Desc='Apaga o conteúdo das pastas temporárias do usuário e do Windows.' }
+    [pscustomobject]@{ Key='EdgeDebloat';      Name='Debloat do Microsoft Edge';                         Cat='Avançado (cuidado)'; Default=$false; Desc='Desliga telemetria, recomendações, Rewards, Shopping e campanhas do Microsoft Edge, mantendo o navegador instalado.' }
+    [pscustomobject]@{ Key='RemoveEdge';       Name='Remover Microsoft Edge';                            Cat='Avançado (cuidado)'; Default=$false; Desc='Desinstala o Microsoft Edge do sistema. CUIDADO: alguns componentes do Windows usam o Edge (WebView) e podem ser afetados.' }
+    [pscustomobject]@{ Key='RemoveOneDrive';   Name='Remover OneDrive';                                  Cat='Avançado (cuidado)'; Default=$false; Desc='Desinstala o OneDrive e desativa o serviço de sincronização. Faça backup dos arquivos na nuvem antes.' }
+    [pscustomobject]@{ Key='WindowsAI';        Name='Desativar e remover IA (Copilot/Recall)';           Cat='Avançado (cuidado)'; Default=$false; Desc='Remove o Copilot, desativa o Recall e recursos de IA do Windows.' }
+    [pscustomobject]@{ Key='VisualEffects';    Name='Efeitos visuais para melhor desempenho';            Cat='Avançado (cuidado)'; Default=$false; Desc='Desliga animações e efeitos visuais para priorizar desempenho. Útil em máquinas fracas; a interface fica menos suave.' }
+    [pscustomobject]@{ Key='StorageSense';     Name='Desativar Sensor de Armazenamento';                 Cat='Avançado (cuidado)'; Default=$false; Desc='Desativa o Sensor de Armazenamento, que apaga arquivos temporários e da Lixeira automaticamente.' }
+    [pscustomobject]@{ Key='Notifications';    Name='Desativar notificações e calendário da bandeja';    Cat='Avançado (cuidado)'; Default=$false; Desc='Desativa TODAS as notificações e a central de ações, incluindo o calendário da bandeja.' }
+    [pscustomobject]@{ Key='ReservedStorage';  Name='Desativar Armazenamento Reservado';                 Cat='Avançado (cuidado)'; Default=$false; Desc='Libera os ~7 GB que o Windows reserva para atualizações. Reative antes de uma grande atualização de versão.' }
+    [pscustomobject]@{ Key='UTCTime';          Name='Relógio em UTC (dual boot com Linux)';              Cat='Avançado (cuidado)'; Default=$false; Desc='Faz o Windows tratar o relógio da BIOS como UTC. Corrige a hora errada em dual boot com Linux.' }
+    [pscustomobject]@{ Key='HomeGallery';      Name='Remover Início e Galeria do Explorer';              Cat='Avançado (cuidado)'; Default=$false; Desc='Remove "Início" e "Galeria" da lateral do Explorer e faz abrir em Este Computador.' }
+    [pscustomobject]@{ Key='IPv4Preferred';    Name='Preferir IPv4 sobre IPv6';                          Cat='Avançado (cuidado)'; Default=$false; Desc='Faz o Windows preferir IPv4 em vez de IPv6. Pode reduzir latência em redes sem IPv6 configurado.' }
+    [pscustomobject]@{ Key='Teredo';           Name='Desativar Teredo';                                  Cat='Avançado (cuidado)'; Default=$false; Desc='Desativa o túnel Teredo (IPv6 sobre IPv4). Pode atrapalhar multiplayer em alguns jogos.' }
+    [pscustomobject]@{ Key='DisableIPv6';      Name='Desativar IPv6 completamente';                      Cat='Avançado (cuidado)'; Default=$false; Desc='Desativa o IPv6 completamente nos adaptadores. Só use se souber que a rede não depende dele.' }
+    [pscustomobject]@{ Key='RazerBlock';       Name='Bloquear auto-instalação de software Razer';        Cat='Avançado (cuidado)'; Default=$false; Desc='Impede o Windows de baixar e instalar o software Razer automaticamente ao conectar um periférico da marca.' }
+    [pscustomobject]@{ Key='BraveDebloat';     Name='Debloat do navegador Brave';                        Cat='Avançado (cuidado)'; Default=$false; Desc='Desativa Rewards, Wallet, VPN, IA, Notícias, Tor e telemetria do navegador Brave.' }
 )
 
 # --- Apps da Store para remoção (aba Privacidade, coluna direita) ---
@@ -464,16 +463,16 @@ $AppxDebloat = @(
 
 # --- Recursos opcionais do Windows (aba Recursos) ---
 $WinFeatures = @(
-    [pscustomobject]@{ Key='dotnet35';   Name='.NET Framework 3.5 (2.0/3.0)';               Features=@('NetFx3'); Default=$false }
-    [pscustomobject]@{ Key='HyperV';     Name='Hyper-V (virtualização Microsoft)';          Features=@('Microsoft-Hyper-V-All'); Default=$false }
-    [pscustomobject]@{ Key='WSL';        Name='Subsistema Linux (WSL)';                     Features=@('VirtualMachinePlatform','Microsoft-Windows-Subsystem-Linux'); Default=$false }
-    [pscustomobject]@{ Key='Sandbox';    Name='Windows Sandbox';                            Features=@('Containers-DisposableClientVM'); Default=$false }
-    [pscustomobject]@{ Key='NFS';        Name='Cliente NFS (Network File System)';          Features=@('ServicesForNFS-ClientOnly','ClientForNFS-Infrastructure','NFS-Administration'); Special='NFS'; Default=$false }
-    [pscustomobject]@{ Key='LegacyMedia';Name='Componentes de mídia legados (WMP/DirectPlay)'; Features=@('WindowsMediaPlayer','MediaPlayback','DirectPlay','LegacyComponents'); Default=$false }
-    [pscustomobject]@{ Key='TelnetClient';Name='Cliente Telnet';                            Features=@('TelnetClient'); Default=$false }
-    [pscustomobject]@{ Key='SSHServer';  Name='Servidor OpenSSH (acesso remoto por SSH)';   Features=@(); Special='SSHServer'; Default=$false }
-    [pscustomobject]@{ Key='RegBackup';  Name='Backup diário do registro (00:30)';          Features=@(); Special='RegBackup'; Default=$false }
-    [pscustomobject]@{ Key='LegacyF8';   Name='Recuperação por F8 (menu de boot legado)';   Features=@(); Special='LegacyF8'; Default=$false }
+    [pscustomobject]@{ Key='dotnet35';   Name='.NET Framework 3.5 (2.0/3.0)';               Features=@('NetFx3'); Default=$false; Desc='Instala o .NET Framework 3.5 (inclui 2.0 e 3.0), exigido por muitos programas antigos. Baixa da internet ou do Windows Update.' }
+    [pscustomobject]@{ Key='HyperV';     Name='Hyper-V (virtualização Microsoft)';          Features=@('Microsoft-Hyper-V-All'); Default=$false; Desc='Ativa o Hyper-V, a virtualização da Microsoft, para criar máquinas virtuais. Pode conflitar com VirtualBox/VMware antigos.' }
+    [pscustomobject]@{ Key='WSL';        Name='Subsistema Linux (WSL)';                     Features=@('VirtualMachinePlatform','Microsoft-Windows-Subsystem-Linux'); Default=$false; Desc='Ativa o Subsistema do Windows para Linux, permitindo rodar distribuições Linux dentro do Windows.' }
+    [pscustomobject]@{ Key='Sandbox';    Name='Windows Sandbox';                            Features=@('Containers-DisposableClientVM'); Default=$false; Desc='Ativa o Windows Sandbox: uma área isolada e descartável para testar programas suspeitos com segurança.' }
+    [pscustomobject]@{ Key='NFS';        Name='Cliente NFS (Network File System)';          Features=@('ServicesForNFS-ClientOnly','ClientForNFS-Infrastructure','NFS-Administration'); Special='NFS'; Default=$false; Desc='Instala o cliente NFS, para montar compartilhamentos de servidores Linux/Unix e alguns NAS.' }
+    [pscustomobject]@{ Key='LegacyMedia';Name='Componentes de mídia legados (WMP/DirectPlay)'; Features=@('WindowsMediaPlayer','MediaPlayback','DirectPlay','LegacyComponents'); Default=$false; Desc='Ativa componentes antigos de mídia: Windows Media Player, DirectPlay (jogos antigos) e outros.' }
+    [pscustomobject]@{ Key='TelnetClient';Name='Cliente Telnet';                            Features=@('TelnetClient'); Default=$false; Desc='Instala o cliente Telnet, útil para testar portas e equipamentos de rede pela linha de comando.' }
+    [pscustomobject]@{ Key='SSHServer';  Name='Servidor OpenSSH (acesso remoto por SSH)';   Features=@(); Special='SSHServer'; Default=$false; Desc='Ativa o servidor OpenSSH e libera a porta 22 no firewall, permitindo acesso remoto por SSH a esta máquina.' }
+    [pscustomobject]@{ Key='RegBackup';  Name='Backup diário do registro (00:30)';          Features=@(); Special='RegBackup'; Default=$false; Desc='Recria o backup automático do registro (desativado pela Microsoft desde o Windows 10 1803), agendado para 00:30.' }
+    [pscustomobject]@{ Key='LegacyF8';   Name='Recuperação por F8 (menu de boot legado)';   Features=@(); Special='LegacyF8'; Default=$false; Desc='Reativa o menu de boot antigo por F8, com Modo de Segurança e opções de recuperação.' }
 )
 
 # --- Painéis clássicos do Windows (aba Recursos) ---
@@ -497,16 +496,16 @@ $LegacyPanels = @(
 # --- Ajustes aplicados na imagem da ISO (aba Criar ISO) ---
 # Perfis: Conservador (só o essencial), Recomendado (padrão) e Agressivo (tudo).
 $IsoTweaks = @(
-    [pscustomobject]@{ Key='Bypass';            Name='Bypass de requisitos (TPM, Secure Boot, CPU, RAM)'; Perfis=@('Conservador','Recomendado','Agressivo') }
-    [pscustomobject]@{ Key='LocalAccount';      Name='Permitir conta local no OOBE (BypassNRO)';          Perfis=@('Conservador','Recomendado','Agressivo') }
-    [pscustomobject]@{ Key='Sponsored';         Name='Desativar apps patrocinados e sugestões';           Perfis=@('Recomendado','Agressivo') }
-    [pscustomobject]@{ Key='Telemetry';         Name='Desativar telemetria';                              Perfis=@('Recomendado','Agressivo') }
-    [pscustomobject]@{ Key='TelemetryTasks';    Name='Remover tarefas agendadas de telemetria/CEIP';      Perfis=@('Recomendado','Agressivo') }
-    [pscustomobject]@{ Key='Copilot';           Name='Desativar Copilot e ícone do Chat';                 Perfis=@('Recomendado','Agressivo') }
-    [pscustomobject]@{ Key='OneDriveBackup';    Name='Desativar backup automático do OneDrive';           Perfis=@('Recomendado','Agressivo') }
-    [pscustomobject]@{ Key='NoBitLocker';       Name='Impedir criptografia automática (BitLocker)';       Perfis=@('Recomendado','Agressivo') }
-    [pscustomobject]@{ Key='BlockTeamsOutlook'; Name='Bloquear instalação de Teams e novo Outlook';       Perfis=@('Agressivo') }
-    [pscustomobject]@{ Key='ReservedStorage';   Name='Desativar Armazenamento Reservado (~7 GB)';         Perfis=@('Agressivo') }
+    [pscustomobject]@{ Key='Bypass';            Name='Bypass de requisitos (TPM, Secure Boot, CPU, RAM)'; Perfis=@('Conservador','Recomendado','Agressivo'); Desc='Grava as chaves LabConfig que permitem instalar o Windows 11 em máquinas sem TPM 2.0, Secure Boot ou CPU compatível.' }
+    [pscustomobject]@{ Key='LocalAccount';      Name='Permitir conta local no OOBE (BypassNRO)';          Perfis=@('Conservador','Recomendado','Agressivo'); Desc='Grava BypassNRO, que reativa a opção de criar conta local durante a instalação (sem exigir conta Microsoft).' }
+    [pscustomobject]@{ Key='Sponsored';         Name='Desativar apps patrocinados e sugestões';           Perfis=@('Recomendado','Agressivo'); Desc='Desativa, já na imagem, os apps promovidos e as sugestões que o Windows instala no primeiro login.' }
+    [pscustomobject]@{ Key='Telemetry';         Name='Desativar telemetria';                              Perfis=@('Recomendado','Agressivo'); Desc='Desativa a coleta de dados de diagnóstico da Microsoft, ID de anúncios, reconhecimento de escrita/voz e o serviço DiagTrack.' }
+    [pscustomobject]@{ Key='TelemetryTasks';    Name='Remover tarefas agendadas de telemetria/CEIP';      Perfis=@('Recomendado','Agressivo'); Desc='Apaga da imagem as tarefas agendadas de telemetria e do programa de experiência do cliente (CEIP).' }
+    [pscustomobject]@{ Key='Copilot';           Name='Desativar Copilot e ícone do Chat';                 Perfis=@('Recomendado','Agressivo'); Desc='Desliga o Copilot e remove o ícone do Chat/Teams da barra de tarefas já na imagem.' }
+    [pscustomobject]@{ Key='OneDriveBackup';    Name='Desativar backup automático do OneDrive';           Perfis=@('Recomendado','Agressivo'); Desc='Desativa o backup automático das pastas do usuário para o OneDrive.' }
+    [pscustomobject]@{ Key='NoBitLocker';       Name='Impedir criptografia automática (BitLocker)';       Perfis=@('Recomendado','Agressivo'); Desc='Impede a criptografia automática do disco na primeira inicialização, que pode travar o acesso sem a chave de recuperação.' }
+    [pscustomobject]@{ Key='BlockTeamsOutlook'; Name='Bloquear instalação de Teams e novo Outlook';       Perfis=@('Agressivo'); Desc='Impede que o Windows instale automaticamente o Teams e o novo Outlook após a instalação.' }
+    [pscustomobject]@{ Key='ReservedStorage';   Name='Desativar Armazenamento Reservado (~7 GB)';         Perfis=@('Agressivo'); Desc='Libera os ~7 GB que o Windows reserva para atualizações. Reative antes de uma grande atualização de versão.' }
 )
 
 # --- Servidores DNS (aba Recursos) ---
@@ -3590,7 +3589,16 @@ function Invoke-GwtRunspace {
                             </Border>
                             <Border Grid.Row="1" Style="{StaticResource Card}">
                                 <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                    <WrapPanel Name="PreferencesList" Orientation="Vertical" ItemHeight="30" MaxHeight="99999"/>
+                                    <Grid Name="PreferencesList">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Name="PrefCol0" Grid.Column="0" Margin="0,0,14,0"/>
+                                        <StackPanel Name="PrefCol1" Grid.Column="1" Margin="0,0,14,0"/>
+                                        <StackPanel Name="PrefCol2" Grid.Column="2"/>
+                                    </Grid>
                                 </ScrollViewer>
                             </Border>
                             <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
@@ -3623,7 +3631,14 @@ function Invoke-GwtRunspace {
                                             <TextBlock Text="Telemetria, rastreamento, bloat e ajustes de desempenho. Backup .reg antes de aplicar." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,0"/>
                                         </StackPanel>
                                         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                                            <StackPanel Name="PrivacyList"/>
+                                            <Grid Name="PrivacyList">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Name="PrivCol0" Grid.Column="0" Margin="0,0,12,0"/>
+                                                <StackPanel Name="PrivCol1" Grid.Column="1"/>
+                                            </Grid>
                                         </ScrollViewer>
                                     </Grid>
                                 </Border>
@@ -4081,6 +4096,7 @@ function Get-SelectedFolderDefs {
 foreach ($action in $NetworkActions) {
     $check = New-Object System.Windows.Controls.CheckBox
     $check.Content = "$($action.Name)   [$($action.Risk)]"
+    if ($action.PSObject.Properties.Name -contains 'Desc') { $check.ToolTip = $action.Desc }
     $check.Tag = $action.Key
     $check.IsChecked = [bool]$action.Default
     [void]$sync.Controls['NetworkList'].Children.Add($check)
@@ -4109,34 +4125,76 @@ function Add-GwtCategoryHeader {
     [void]$Panel.Children.Add($label)
 }
 
-# --- Ajustes (preferências, em grade por categoria) ---
-$lastCategory = $null
-foreach ($pref in $Preferences) {
-    if ($pref.Cat -ne $lastCategory) {
-        Add-GwtCategoryHeader -Panel $sync.Controls['PreferencesList'] -Text $pref.Cat
-        $lastCategory = $pref.Cat
+# Distribui blocos de categoria entre colunas, sempre na de menor altura acumulada.
+function Add-GwtCategoryColumns {
+    param(
+        [object[]]$Itens,          # objetos com Cat, Name, Key, Default e (opcional) Desc
+        [string[]]$ColunaNomes,    # nomes dos StackPanels de coluna
+        [scriptblock]$AoCriar      # opcional: recebe o checkbox criado
+    )
+    $colunas = @($ColunaNomes | ForEach-Object { $sync.Controls[$_] })
+    $pesos = @(0) * $colunas.Count
+
+    foreach ($grupo in ($Itens | Group-Object Cat)) {
+        $alvo = 0
+        for ($i = 1; $i -lt $colunas.Count; $i++) {
+            if ($pesos[$i] -lt $pesos[$alvo]) { $alvo = $i }
+        }
+
+        $bloco = New-Object System.Windows.Controls.StackPanel
+        $bloco.Margin = '0,0,0,10'
+        Add-GwtCategoryHeader -Panel $bloco -Text $grupo.Name -Margin '0,4,0,4'
+
+        foreach ($item in $grupo.Group) {
+            $check = New-Object System.Windows.Controls.CheckBox
+            # Texto como TextBlock com quebra: nomes longos não são cortados na coluna
+            $rotulo = New-Object System.Windows.Controls.TextBlock
+            $rotulo.Text = $item.Name
+            $rotulo.TextWrapping = 'Wrap'
+            $check.Content = $rotulo
+            if ($item.PSObject.Properties.Name -contains 'Desc') { $check.ToolTip = $item.Desc }
+            $check.Tag = $item.Key
+            $check.IsChecked = [bool]$item.Default
+            $check.Margin = '0,3,8,3'
+            $check.VerticalContentAlignment = 'Center'
+            if ($AoCriar) { & $AoCriar $check }
+            [void]$bloco.Children.Add($check)
+        }
+
+        [void]$colunas[$alvo].Children.Add($bloco)
+        $pesos[$alvo] += ($grupo.Count + 2)
     }
-    $check = New-Object System.Windows.Controls.CheckBox
-    $check.Content = $pref.Name
-    $check.Tag = $pref.Key
-    $check.IsChecked = [bool]$pref.Default
-    $check.Margin = '0,2,24,2'
-    [void]$sync.Controls['PreferencesList'].Children.Add($check)
 }
 
-# --- Privacidade (por categoria) ---
-$lastCategory = $null
-foreach ($tw in $PrivacyTweaks) {
-    if ($tw.Cat -ne $lastCategory) {
-        Add-GwtCategoryHeader -Panel $sync.Controls['PrivacyList'] -Text $tw.Cat -Margin '0,10,0,4'
-        $lastCategory = $tw.Cat
+# Percorre painéis em colunas (coluna > bloco > checkbox)
+function Get-GwtColumnCheckBoxes {
+    param([string[]]$ColunaNomes)
+    $boxes = New-Object System.Collections.Generic.List[object]
+    foreach ($nome in $ColunaNomes) {
+        foreach ($bloco in $sync.Controls[$nome].Children) {
+            if ($bloco -isnot [System.Windows.Controls.StackPanel]) { continue }
+            foreach ($c in $bloco.Children) {
+                if ($c -is [System.Windows.Controls.CheckBox]) { $boxes.Add($c) }
+            }
+        }
     }
-    $check = New-Object System.Windows.Controls.CheckBox
-    $check.Content = $tw.Name
-    $check.Tag = $tw.Key
-    $check.IsChecked = [bool]$tw.Default
-    [void]$sync.Controls['PrivacyList'].Children.Add($check)
+    return $boxes.ToArray()
 }
+
+function Get-GwtCheckedKeysIn {
+    param([string[]]$ColunaNomes)
+    $keys = @()
+    foreach ($c in (Get-GwtColumnCheckBoxes -ColunaNomes $ColunaNomes)) {
+        if ($c.IsChecked) { $keys += [string]$c.Tag }
+    }
+    return $keys
+}
+
+# --- Ajustes (preferências, em 3 colunas por categoria) ---
+Add-GwtCategoryColumns -Itens $Preferences -ColunaNomes @('PrefCol0', 'PrefCol1', 'PrefCol2')
+
+# --- Privacidade (Essencial e Avançado lado a lado) ---
+Add-GwtCategoryColumns -Itens $PrivacyTweaks -ColunaNomes @('PrivCol0', 'PrivCol1')
 
 # --- Apps da Store (por categoria) ---
 $lastCategory = $null
@@ -4157,6 +4215,7 @@ foreach ($app in $AppxDebloat) {
 foreach ($tw in $IsoTweaks) {
     $check = New-Object System.Windows.Controls.CheckBox
     $check.Content = $tw.Name
+    if ($tw.PSObject.Properties.Name -contains 'Desc') { $check.ToolTip = $tw.Desc }
     $check.Tag = $tw.Key
     $check.FontSize = 12
     [void]$sync.Controls['IsoTweakList'].Children.Add($check)
@@ -4215,6 +4274,7 @@ function Set-GwtIsoAppsSelection {
 foreach ($feat in $WinFeatures) {
     $check = New-Object System.Windows.Controls.CheckBox
     $check.Content = $feat.Name
+    if ($feat.PSObject.Properties.Name -contains 'Desc') { $check.ToolTip = $feat.Desc }
     $check.Tag = $feat
     $check.IsChecked = [bool]$feat.Default
     [void]$sync.Controls['FeatureList'].Children.Add($check)
@@ -4374,8 +4434,8 @@ function Get-CurrentSelectionPreset {
         TargetDrive = Get-SelectedDrive
         Folders     = @((Get-SelectedFolderDefs).Key)
         Network     = @(Get-CheckedKeys -Panel $sync.Controls['NetworkList'])
-        Preferences = @(Get-CheckedKeys -Panel $sync.Controls['PreferencesList'])
-        Privacy     = @(Get-CheckedKeys -Panel $sync.Controls['PrivacyList'])
+        Preferences = @(Get-GwtCheckedKeysIn @('PrefCol0','PrefCol1','PrefCol2'))
+        Privacy     = @(Get-GwtCheckedKeysIn @('PrivCol0','PrivCol1'))
         RemoveApps  = @(Get-CheckedTags -Panel $sync.Controls['AppxList'] -Property 'Id')
         Features    = @(Get-CheckedTags -Panel $sync.Controls['FeatureList'] -Property 'Key')
         Packages    = @((Get-SelectedPackages).Key)
@@ -4408,13 +4468,13 @@ function Apply-PresetObject {
     $prefList = if ($PresetData.PSObject.Properties.Name -contains 'Preferences') { $PresetData.Preferences }
                 elseif ($PresetData.PSObject.Properties.Name -contains 'Tweaks') { $PresetData.Tweaks } else { $null }
     if ($null -ne $prefList) {
-        foreach ($child in $sync.Controls['PreferencesList'].Children) {
-            if ($child -is [System.Windows.Controls.CheckBox]) { $child.IsChecked = (@($prefList) -contains [string]$child.Tag) }
+        foreach ($child in (Get-GwtColumnCheckBoxes @('PrefCol0', 'PrefCol1', 'PrefCol2'))) {
+            $child.IsChecked = (@($prefList) -contains [string]$child.Tag)
         }
     }
     if ($PresetData.PSObject.Properties.Name -contains 'Privacy') {
-        foreach ($child in $sync.Controls['PrivacyList'].Children) {
-            if ($child -is [System.Windows.Controls.CheckBox]) { $child.IsChecked = (@($PresetData.Privacy) -contains [string]$child.Tag) }
+        foreach ($child in (Get-GwtColumnCheckBoxes @('PrivCol0', 'PrivCol1'))) {
+            $child.IsChecked = (@($PresetData.Privacy) -contains [string]$child.Tag)
         }
     }
     if ($PresetData.PSObject.Properties.Name -contains 'RemoveApps') {
@@ -4688,7 +4748,7 @@ $sync.Controls['PackageSearchBox'].Add_TextChanged({ Update-PackageFilter })
 
 $sync.Controls['PreferencesApplyButton'].Add_Click({
     if ($sync.Busy) { return }
-    $selected = Get-CheckedKeys -Panel $sync.Controls['PreferencesList']
+    $selected = @(Get-GwtCheckedKeysIn @('PrefCol0','PrefCol1','PrefCol2'))
     if (-not $selected) { Add-GwtLog 'Nenhum ajuste selecionado.' 'Warn'; return }
     if ([System.Windows.MessageBox]::Show($Window, "Aplicar $($selected.Count) ajuste(s)? Um backup .reg será criado antes.", 'Confirmar ajustes', 'YesNo', 'Question') -ne 'Yes') { return }
     Invoke-GwtRunspace -ScriptBlock {
@@ -4696,11 +4756,11 @@ $sync.Controls['PreferencesApplyButton'].Add_Click({
         Invoke-GwtApplyKeysWorker -Keys $keys -Title 'Ajustes do Windows' -BackupName 'preferences'
     } -Argument $selected
 })
-$sync.Controls['PreferencesNoneButton'].Add_Click({ Set-GwtPanelChecks -Panel $sync.Controls['PreferencesList'] -Checked $false })
+$sync.Controls['PreferencesNoneButton'].Add_Click({ foreach ($c in (Get-GwtColumnCheckBoxes @('PrefCol0','PrefCol1','PrefCol2'))) { $c.IsChecked = $false } })
 
 $sync.Controls['PrivacyApplyButton'].Add_Click({
     if ($sync.Busy) { return }
-    $selected = Get-CheckedKeys -Panel $sync.Controls['PrivacyList']
+    $selected = @(Get-GwtCheckedKeysIn @('PrivCol0','PrivCol1'))
     if (-not $selected) { Add-GwtLog 'Nenhum item de privacidade selecionado.' 'Warn'; return }
     $advanced = @($selected | Where-Object { $sync.OpData[$_] -and $sync.OpData[$_].ContainsKey('Special') })
     $msg = "Aplicar $($selected.Count) item(ns) de privacidade/limpeza?`n`nUm backup .reg será criado antes. Alguns itens exigem Administrador e alguns são de ação avançada (remover Edge/OneDrive, IA, etc.).`n`nContinuar?"
@@ -4726,15 +4786,13 @@ $sync.Controls['DebloatRemoveButton'].Add_Click({
 })
 
 $sync.Controls['PrivacyEssentialButton'].Add_Click({
-    foreach ($child in $sync.Controls['PrivacyList'].Children) {
-        if ($child -is [System.Windows.Controls.CheckBox]) {
-            $def = $PrivacyTweaks | Where-Object { $_.Key -eq [string]$child.Tag }
-            $child.IsChecked = ($def -and $def.Cat -eq 'Essencial')
-        }
+    foreach ($child in (Get-GwtColumnCheckBoxes @('PrivCol0', 'PrivCol1'))) {
+        $def = $PrivacyTweaks | Where-Object { $_.Key -eq [string]$child.Tag }
+        $child.IsChecked = ($def -and $def.Cat -eq 'Essencial')
     }
 })
 $sync.Controls['PrivacyNoneButton'].Add_Click({
-    Set-GwtPanelChecks -Panel $sync.Controls['PrivacyList'] -Checked $false
+    foreach ($c in (Get-GwtColumnCheckBoxes @('PrivCol0','PrivCol1'))) { $c.IsChecked = $false }
     Set-GwtPanelChecks -Panel $sync.Controls['AppxList'] -Checked $false
 })
 
