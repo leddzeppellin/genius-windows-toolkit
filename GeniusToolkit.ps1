@@ -806,6 +806,27 @@ function Convert-GwtGitHubUrl {
     return $u
 }
 
+# Verifica se a URL aponta mesmo para um script executável. Devolve um texto de
+# orientação quando o endereço é de repositório/pasta em vez de arquivo.
+function Test-GwtToolUrl {
+    param([string]$Url)
+    $u = ([string]$Url).Trim()
+
+    if ($u -match '\.git/?$') {
+        return "Esse é o endereço de CLONE do repositório (termina em .git), não de um script.`n`nAbra o repositório no navegador, entre no arquivo .ps1 que você quer executar e copie o link dele."
+    }
+    if ($u -match '^https?://github\.com/[^/]+/[^/]+/?$') {
+        return "Esse é o endereço da PÁGINA INICIAL do repositório, não de um script.`n`nEntre no arquivo .ps1 desejado (normalmente na raiz ou em uma pasta como /scripts) e copie o link dele."
+    }
+    if ($u -match '^https?://github\.com/[^/]+/[^/]+/tree/') {
+        return "Esse é o endereço de uma PASTA do repositório, não de um arquivo.`n`nAbra o arquivo .ps1 dentro dela e copie o link."
+    }
+    if ($u -match '^https?://github\.com/[^/]+/[^/]+/releases') {
+        return "Esse é o endereço da página de RELEASES.`n`nO 'irm | iex' precisa de um arquivo de script. Baixe o release e execute manualmente, ou use o link direto de um .ps1 do repositório."
+    }
+    return $null
+}
+
 function Get-GwtDefaultTools {
     @(
         [pscustomobject]@{
@@ -5543,6 +5564,14 @@ $sync.Controls['ExtToolAddButton'].Add_Click({
 
     if ([string]::IsNullOrWhiteSpace($nome) -or [string]::IsNullOrWhiteSpace($url)) {
         [System.Windows.MessageBox]::Show($Window, 'Informe o nome e a URL da ferramenta.', 'Campos obrigatórios', 'OK', 'Warning') | Out-Null
+        return
+    }
+
+    # A URL aponta mesmo para um script?
+    $problema = Test-GwtToolUrl -Url $url
+    if ($problema) {
+        [System.Windows.MessageBox]::Show($Window, "$problema`n`nURL informada:`n$url", 'URL não é de um script', 'OK', 'Warning') | Out-Null
+        Add-GwtLog "URL rejeitada (não aponta para um script): $url" 'Warn'
         return
     }
 
