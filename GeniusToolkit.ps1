@@ -3340,7 +3340,16 @@ function Invoke-GwtRunspace {
 
                             <Border Grid.Row="1" Style="{StaticResource Card}">
                                 <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                    <WrapPanel Name="PackageList" Orientation="Vertical" ItemHeight="30" MaxHeight="99999"/>
+                                    <Grid Name="PackageList">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Name="PackageCol0" Grid.Column="0" Margin="0,0,14,0"/>
+                                        <StackPanel Name="PackageCol1" Grid.Column="1" Margin="0,0,14,0"/>
+                                        <StackPanel Name="PackageCol2" Grid.Column="2"/>
+                                    </Grid>
                                 </ScrollViewer>
                             </Border>
 
@@ -3909,55 +3918,88 @@ function Set-GwtPanelChecks {
     }
 }
 
-# --- Programas ---
-$lastCategory = $null
-foreach ($pkg in $Packages) {
-    if ($pkg.Category -ne $lastCategory) {
-        $label = New-Object System.Windows.Controls.TextBlock
-        $label.Text = $pkg.Category
-        $label.FontWeight = 'Bold'
-        $label.FontSize = 13
-        $label.Margin = '0,8,24,4'
-        $label.Foreground = $Window.Resources['GoldBrush']
-        [void]$sync.Controls['PackageList'].Children.Add($label)
-        $lastCategory = $pkg.Category
+# --- Programas: categorias distribuídas em 3 colunas balanceadas ---
+# Cada coluna recebe blocos de categoria (cabeçalho + checkboxes). A distribuição
+# usa a coluna com menor altura acumulada, evitando uma lista única enorme.
+$packageColumns = @($sync.Controls['PackageCol0'], $sync.Controls['PackageCol1'], $sync.Controls['PackageCol2'])
+$columnWeight = @(0, 0, 0)
+
+foreach ($group in ($Packages | Group-Object Category)) {
+    # Coluna mais "vazia" no momento (peso = itens + cabeçalho)
+    $target = 0
+    for ($i = 1; $i -lt $packageColumns.Count; $i++) {
+        if ($columnWeight[$i] -lt $columnWeight[$target]) { $target = $i }
     }
-    $check = New-Object System.Windows.Controls.CheckBox
-    $check.Content = $pkg.Name
-    $check.Tag = $pkg
-    $check.ToolTip = "$($pkg.Id)"
-    $check.IsChecked = [bool]$pkg.Default
-    $check.Margin = '0,2,24,2'
-    $check.Add_Checked({ Update-PackageCount })
-    $check.Add_Unchecked({ Update-PackageCount })
-    [void]$sync.Controls['PackageList'].Children.Add($check)
+
+    $block = New-Object System.Windows.Controls.StackPanel
+    $block.Margin = '0,0,0,10'
+
+    $label = New-Object System.Windows.Controls.TextBlock
+    $label.Text = $group.Name
+    $label.FontWeight = 'Bold'
+    $label.FontSize = 13
+    $label.Margin = '0,4,0,4'
+    $label.Foreground = $Window.Resources['GoldBrush']
+    [void]$block.Children.Add($label)
+
+    foreach ($pkg in ($group.Group | Sort-Object Name)) {
+        $check = New-Object System.Windows.Controls.CheckBox
+        $check.Content = $pkg.Name
+        $check.Tag = $pkg
+        $check.ToolTip = "$($pkg.Id)"
+        $check.IsChecked = [bool]$pkg.Default
+        $check.Margin = '0,2,8,2'
+        $check.Add_Checked({ Update-PackageCount })
+        $check.Add_Unchecked({ Update-PackageCount })
+        [void]$block.Children.Add($check)
+    }
+
+    [void]$packageColumns[$target].Children.Add($block)
+    $columnWeight[$target] += ($group.Count + 2)   # +2 pelo cabeçalho e respiro
+}
+
+# Percorre coluna > bloco de categoria > checkbox
+function Get-GwtPackageBlocks {
+    $blocks = New-Object System.Collections.Generic.List[object]
+    foreach ($col in @($sync.Controls['PackageCol0'], $sync.Controls['PackageCol1'], $sync.Controls['PackageCol2'])) {
+        foreach ($block in $col.Children) {
+            if ($block -is [System.Windows.Controls.StackPanel]) { $blocks.Add($block) }
+        }
+    }
+    return $blocks.ToArray()
+}
+
+function Get-GwtPackageCheckBoxes {
+    $boxes = New-Object System.Collections.Generic.List[object]
+    foreach ($block in (Get-GwtPackageBlocks)) {
+        foreach ($child in $block.Children) {
+            if ($child -is [System.Windows.Controls.CheckBox]) { $boxes.Add($child) }
+        }
+    }
+    return $boxes.ToArray()
 }
 
 function Get-SelectedPackages {
-    $selected = @()
-    foreach ($child in $sync.Controls['PackageList'].Children) {
-        if ($child -is [System.Windows.Controls.CheckBox] -and $child.IsChecked) {
-            $selected += $child.Tag
-        }
+    $selected = New-Object System.Collections.Generic.List[object]
+    foreach ($check in (Get-GwtPackageCheckBoxes)) {
+        if ($check.IsChecked) { $selected.Add($check.Tag) }
     }
-    return @($selected)
+    return $selected.ToArray()
 }
 
 function Update-PackageCount {
-    $count = (Get-SelectedPackages).Count
+    $count = @(Get-SelectedPackages).Count
     $sync.Controls['PackageCountText'].Text = "$count selecionado(s)"
 }
 Update-PackageCount
 
 function Set-PackageSelection {
     param([ValidateSet('Default', 'All', 'None')][string]$Mode)
-    foreach ($child in $sync.Controls['PackageList'].Children) {
-        if ($child -is [System.Windows.Controls.CheckBox]) {
-            switch ($Mode) {
-                'All'     { $child.IsChecked = $true }
-                'None'    { $child.IsChecked = $false }
-                'Default' { $child.IsChecked = [bool]$child.Tag.Default }
-            }
+    foreach ($check in (Get-GwtPackageCheckBoxes)) {
+        switch ($Mode) {
+            'All'     { $check.IsChecked = $true }
+            'None'    { $check.IsChecked = $false }
+            'Default' { $check.IsChecked = [bool]$check.Tag.Default }
         }
     }
     Update-PackageCount
@@ -3965,14 +4007,19 @@ function Set-PackageSelection {
 
 function Update-PackageFilter {
     $filter = $sync.Controls['PackageSearchBox'].Text
-    foreach ($child in $sync.Controls['PackageList'].Children) {
-        if ($child -is [System.Windows.Controls.CheckBox]) {
+    foreach ($block in (Get-GwtPackageBlocks)) {
+        $visibleCount = 0
+        foreach ($child in $block.Children) {
+            if ($child -isnot [System.Windows.Controls.CheckBox]) { continue }
             $match = [string]::IsNullOrWhiteSpace($filter) -or
                      $child.Tag.Name -like "*$filter*" -or
                      $child.Tag.Id -like "*$filter*" -or
                      $child.Tag.Category -like "*$filter*"
             $child.Visibility = if ($match) { 'Visible' } else { 'Collapsed' }
+            if ($match) { $visibleCount++ }
         }
+        # Esconde a categoria inteira quando nada nela casa com a busca
+        $block.Visibility = if ($visibleCount -gt 0) { 'Visible' } else { 'Collapsed' }
     }
 }
 
@@ -4055,10 +4102,8 @@ function Apply-PresetObject {
         }
     }
     if ($PresetData.PSObject.Properties.Name -contains 'Packages') {
-        foreach ($child in $sync.Controls['PackageList'].Children) {
-            if ($child -is [System.Windows.Controls.CheckBox]) {
-                $child.IsChecked = (@($PresetData.Packages) -contains [string]$child.Tag.Key)
-            }
+        foreach ($check in (Get-GwtPackageCheckBoxes)) {
+            $check.IsChecked = (@($PresetData.Packages) -contains [string]$check.Tag.Key)
         }
         Update-PackageCount
     }
@@ -4790,12 +4835,10 @@ function Invoke-PendingUiAction {
             $installed = $sync['DetectedInstalled']
             if (-not $installed) { return }
             $count = 0
-            foreach ($child in $sync.Controls['PackageList'].Children) {
-                if ($child -is [System.Windows.Controls.CheckBox]) {
-                    $id = ([string]$child.Tag.Id)
-                    if ($id -like 'msstore:*') { $id = $id.Substring(8) }
-                    if ($installed.ContainsKey($id.ToLower())) { $child.IsChecked = $true; $count++ }
-                }
+            foreach ($check in (Get-GwtPackageCheckBoxes)) {
+                $id = ([string]$check.Tag.Id)
+                if ($id -like 'msstore:*') { $id = $id.Substring(8) }
+                if ($installed.ContainsKey($id.ToLower())) { $check.IsChecked = $true; $count++ }
             }
             Update-PackageCount
             Add-GwtLog "$count programa(s) do catálogo detectado(s) como instalado(s) e marcado(s)." 'Success'
@@ -4943,6 +4986,12 @@ if ($SmokeTest) {
     # O autounattend.xml precisa ser XML válido.
     try { [xml](Get-GwtAutounattendXml -AccountName 'Teste') | Out-Null }
     catch { $issues += 'autounattend-xml-invalido' }
+
+    # A grade de programas em colunas precisa expor todos os pacotes do catálogo.
+    $renderedPkgs = @(Get-GwtPackageCheckBoxes).Count
+    if ($renderedPkgs -ne $Packages.Count) {
+        $issues += "grade-programas:$renderedPkgs-de-$($Packages.Count)"
+    }
 
     # Teste funcional da análise: usa a própria unidade do perfil (nada a copiar,
     # roda em instantes) e confirma que o plano é montado sem erro de runtime.
