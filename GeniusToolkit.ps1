@@ -102,6 +102,7 @@ $sync.CancelRequested = $false     # pedido de cancelamento da operação em and
 $sync.SessionActions = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new())
 $sync.SessionStart   = Get-Date
 $sync.UpdateInfo     = $null       # preenchido quando há versão nova no GitHub
+$sync.ExtTools       = @()         # ferramentas externas cadastradas pelo usuário
 
 New-Item -ItemType Directory -Path $sync.BackupRoot, $sync.LogRoot, $sync.ReportRoot -Force | Out-Null
 
@@ -768,6 +769,58 @@ function Set-GwtKnownFolderPath {
     if ($result -ne 0) {
         throw ("Não foi possível definir '{0}'. HRESULT: 0x{1:X8}" -f $Path, $result)
     }
+}
+
+# ---- Ferramentas externas (scripts de terceiros por irm | iex) ----
+# O cadastro fica em ferramentas.json ao lado do app (portátil, vai no pendrive)
+# ou, se o app rodar por irm|iex, em %LOCALAPPDATA%\GeniusWindowsToolkit.
+function Get-GwtToolsFile {
+    if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+        $aoLado = Join-Path (Split-Path -Parent $PSCommandPath) 'ferramentas.json'
+        # Usa o arquivo do pendrive se já existir ou se a pasta for gravável
+        if (Test-Path -LiteralPath $aoLado) { return $aoLado }
+        try {
+            $teste = Join-Path (Split-Path -Parent $PSCommandPath) '.gwt-write-test'
+            New-Item -ItemType File -Path $teste -Force -ErrorAction Stop | Out-Null
+            Remove-Item $teste -Force -ErrorAction SilentlyContinue
+            return $aoLado
+        }
+        catch { }
+    }
+    return (Join-Path $sync.AppRoot 'ferramentas.json')
+}
+
+function Get-GwtDefaultTools {
+    @(
+        [pscustomobject]@{
+            Nome  = 'WinUtil (Chris Titus)'
+            Url   = 'https://christitus.com/win'
+            Admin = $true
+            Desc  = 'Utilitário open source de tweaks e instalação de programas.'
+        }
+    )
+}
+
+function Import-GwtTools {
+    $arquivo = Get-GwtToolsFile
+    if (Test-Path -LiteralPath $arquivo) {
+        try {
+            $dados = Get-Content -LiteralPath $arquivo -Raw -Encoding UTF8 | ConvertFrom-Json
+            $sync.ExtTools = @($dados)
+            return
+        }
+        catch { Add-GwtLog "ferramentas.json inválido: $($_.Exception.Message)" 'Warn' }
+    }
+    $sync.ExtTools = @(Get-GwtDefaultTools)
+}
+
+function Export-GwtTools {
+    $arquivo = Get-GwtToolsFile
+    try {
+        @($sync.ExtTools) | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $arquivo -Encoding UTF8
+        Add-GwtLog "Ferramentas salvas em: $arquivo" 'Success'
+    }
+    catch { Add-GwtLog "Não foi possível salvar as ferramentas: $($_.Exception.Message)" 'Error' }
 }
 
 # Registra uma ação executada, para o relatório de sessão.
@@ -3831,7 +3884,37 @@ function Invoke-GwtRunspace {
                             <Border Grid.Column="2" Style="{StaticResource Card}">
                                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                                     <StackPanel>
-                                        <TextBlock Text="Correções rápidas" FontSize="18" FontWeight="Bold" Margin="0,0,0,8"/>
+                                        <TextBlock Text="🧰  Ferramentas externas" FontSize="18" FontWeight="Bold" Margin="0,0,0,4"/>
+                                        <TextBlock Text="Atalhos para scripts de outros projetos (irm | iex). Cadastre a URL uma vez e ela vira botão — o cadastro acompanha o pendrive." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,8"/>
+                                        <WrapPanel Name="ExtToolsList"/>
+                                        <Border Background="{StaticResource SoftBrush}" CornerRadius="10" Padding="10" Margin="0,6,0,0">
+                                            <StackPanel>
+                                                <TextBlock Text="Cadastrar nova ferramenta" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,6"/>
+                                                <Grid Margin="0,0,0,6">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="Nome:" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                                    <TextBox Grid.Column="1" Name="ExtToolNameBox" VerticalContentAlignment="Center"/>
+                                                </Grid>
+                                                <Grid Margin="0,0,0,6">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="URL:" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                                    <TextBox Grid.Column="1" Name="ExtToolUrlBox" VerticalContentAlignment="Center" ToolTip="Ex.: https://exemplo.com/script.ps1 — será executado com irm URL | iex"/>
+                                                </Grid>
+                                                <WrapPanel>
+                                                    <CheckBox Name="ExtToolAdminCheck" Content="Executar como Administrador" IsChecked="True" VerticalAlignment="Center" Margin="0,0,12,0" FontSize="12"/>
+                                                    <Button Name="ExtToolAddButton" Style="{StaticResource GhostButton}" Content="➕ Adicionar" Margin="0,0,8,0"/>
+                                                    <Button Name="ExtToolRemoveButton" Style="{StaticResource GhostButton}" Content="🗑 Remover..." Margin="0"/>
+                                                </WrapPanel>
+                                            </StackPanel>
+                                        </Border>
+
+                                        <TextBlock Text="Correções rápidas" FontSize="18" FontWeight="Bold" Margin="0,18,0,8"/>
                                         <WrapPanel>
                                             <Button Name="SystemRepairButton" Style="{StaticResource GhostButton}" Content="🩹 Reparar sistema (DISM+SFC)" Margin="0,0,8,8"/>
                                             <Button Name="UpdateResetButton" Style="{StaticResource GhostButton}" Content="♻️ Resetar Windows Update" Margin="0,0,8,8"/>
@@ -4419,6 +4502,63 @@ foreach ($name in $DnsProviders.Keys) {
     [void]$sync.Controls['DnsCombo'].Items.Add($name)
 }
 $sync.Controls['DnsCombo'].SelectedIndex = 0
+
+# --- Ferramentas externas ---
+function Invoke-GwtExternalTool {
+    param([object]$Ferramenta)
+
+    $url = [string]$Ferramenta.Url
+    $nome = [string]$Ferramenta.Nome
+    $admin = [bool]$Ferramenta.Admin
+
+    $msg = "Executar a ferramenta externa:`n`n$nome`n$url`n`n" +
+           "Isso baixa e executa um script de terceiros nesta máquina" +
+           $(if ($admin) { ' com privilégios de Administrador' } else { '' }) + ".`n" +
+           "Confira se a URL é de fonte confiável.`n`nContinuar?"
+    if ([System.Windows.MessageBox]::Show($Window, $msg, 'Ferramenta externa', 'YesNo', 'Warning') -ne 'Yes') { return }
+
+    try {
+        # Abre em janela própria: essas ferramentas costumam ser interativas
+        $cmd = "irm '$url' | iex"
+        $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-Command', $cmd)
+        if ($admin) { Start-Process powershell.exe -ArgumentList $args -Verb RunAs }
+        else { Start-Process powershell.exe -ArgumentList $args }
+
+        Add-GwtLog "Ferramenta externa iniciada em nova janela: $nome ($url)" 'Success'
+        Add-GwtAction -Categoria 'Ferramentas externas' -Item $nome -Resultado 'OK' -Detalhe $url
+    }
+    catch {
+        Add-GwtLog "Falha ao iniciar '$nome': $($_.Exception.Message)" 'Error'
+    }
+}
+
+function Update-GwtExtToolsList {
+    $painel = $sync.Controls['ExtToolsList']
+    $painel.Children.Clear()
+
+    if (@($sync.ExtTools).Count -eq 0) {
+        $vazio = New-Object System.Windows.Controls.TextBlock
+        $vazio.Text = 'Nenhuma ferramenta cadastrada ainda.'
+        $vazio.Foreground = $Window.Resources['MutedBrush']
+        $vazio.FontSize = 12
+        [void]$painel.Children.Add($vazio)
+        return
+    }
+
+    foreach ($ferr in $sync.ExtTools) {
+        $btn = New-Object System.Windows.Controls.Button
+        $btn.Content = '▶  ' + [string]$ferr.Nome
+        $btn.Style = $Window.Resources['GhostButton']
+        $btn.Margin = '0,0,8,8'
+        $btn.Tag = $ferr
+        $dica = [string]$ferr.Url
+        if ($ferr.PSObject.Properties.Name -contains 'Desc' -and $ferr.Desc) { $dica = "$($ferr.Desc)`n$dica" }
+        if ([bool]$ferr.Admin) { $dica += "`n(executa como Administrador)" }
+        $btn.ToolTip = $dica
+        $btn.Add_Click({ Invoke-GwtExternalTool -Ferramenta $this.Tag })
+        [void]$painel.Children.Add($btn)
+    }
+}
 
 # --- Painéis clássicos ---
 foreach ($panelDef in $LegacyPanels) {
@@ -5158,6 +5298,10 @@ $sync.Controls['IsoAppsSuggestButton'].Add_Click({ Set-GwtIsoAppsSelection -Mode
 # Estado inicial dos ajustes da ISO conforme o perfil padrão (Recomendado)
 Set-GwtIsoProfile -Perfil 'Recomendado'
 
+# Ferramentas externas cadastradas
+Import-GwtTools
+Update-GwtExtToolsList
+
 $sync.Controls['IsoUsbRefreshButton'].Add_Click({
     $combo = $sync.Controls['IsoUsbCombo']
     $combo.Items.Clear()
@@ -5325,6 +5469,59 @@ $sync.Controls['CancelButton'].Add_Click({
     $sync.Controls['CancelButton'].IsEnabled = $false
     $sync.Controls['CancelButton'].Content = '✖ Cancelando...'
     Add-GwtLog 'Cancelamento solicitado — a operação para após concluir o item atual.' 'Warn'
+})
+
+$sync.Controls['ExtToolAddButton'].Add_Click({
+    $nome = ([string]$sync.Controls['ExtToolNameBox'].Text).Trim()
+    $url = ([string]$sync.Controls['ExtToolUrlBox'].Text).Trim()
+
+    if ([string]::IsNullOrWhiteSpace($nome) -or [string]::IsNullOrWhiteSpace($url)) {
+        [System.Windows.MessageBox]::Show($Window, 'Informe o nome e a URL da ferramenta.', 'Campos obrigatórios', 'OK', 'Warning') | Out-Null
+        return
+    }
+    if ($url -notmatch '^https://') {
+        $aviso = "A URL não começa com https://.`n`nBaixar scripts por HTTP não é seguro (podem ser alterados no caminho).`n`nCadastrar mesmo assim?"
+        if ([System.Windows.MessageBox]::Show($Window, $aviso, 'URL sem HTTPS', 'YesNo', 'Warning') -ne 'Yes') { return }
+    }
+
+    $lista = New-Object System.Collections.Generic.List[object]
+    foreach ($t in $sync.ExtTools) { if ([string]$t.Nome -ne $nome) { $lista.Add($t) } }
+    $lista.Add([pscustomobject]@{
+        Nome  = $nome
+        Url   = $url
+        Admin = [bool]$sync.Controls['ExtToolAdminCheck'].IsChecked
+        Desc  = ''
+    })
+    $sync.ExtTools = $lista.ToArray()
+    Export-GwtTools
+    Update-GwtExtToolsList
+
+    $sync.Controls['ExtToolNameBox'].Text = ''
+    $sync.Controls['ExtToolUrlBox'].Text = ''
+    Add-GwtLog "Ferramenta cadastrada: $nome ($url)" 'Success'
+})
+
+$sync.Controls['ExtToolRemoveButton'].Add_Click({
+    if (@($sync.ExtTools).Count -eq 0) { return }
+    $nomes = @($sync.ExtTools | ForEach-Object { $_.Nome })
+    $lista = ($nomes | ForEach-Object { "  • $_" }) -join "`n"
+    $alvo = ([string]$sync.Controls['ExtToolNameBox'].Text).Trim()
+
+    if ([string]::IsNullOrWhiteSpace($alvo)) {
+        [System.Windows.MessageBox]::Show($Window, "Para remover, digite o nome exato da ferramenta no campo Nome e clique em Remover.`n`nCadastradas:`n$lista", 'Remover ferramenta', 'OK', 'Information') | Out-Null
+        return
+    }
+    if ($nomes -notcontains $alvo) {
+        [System.Windows.MessageBox]::Show($Window, "Não existe ferramenta chamada '$alvo'.`n`nCadastradas:`n$lista", 'Não encontrada', 'OK', 'Warning') | Out-Null
+        return
+    }
+    if ([System.Windows.MessageBox]::Show($Window, "Remover a ferramenta '$alvo'?", 'Confirmar remoção', 'YesNo', 'Question') -ne 'Yes') { return }
+
+    $sync.ExtTools = @($sync.ExtTools | Where-Object { [string]$_.Nome -ne $alvo })
+    Export-GwtTools
+    Update-GwtExtToolsList
+    $sync.Controls['ExtToolNameBox'].Text = ''
+    Add-GwtLog "Ferramenta removida: $alvo" 'Success'
 })
 
 $sync.Controls['SessionReportButton'].Add_Click({
@@ -5637,6 +5834,7 @@ if ($SmokeTest) {
                   'IsoKeepEditionsCheck', 'IsoDriverFolderBox', 'IsoExtraFolderBox',
                   'KitOpenButton', 'MonitorIntervalBox', 'MonitorPresetCheck',
                   'RestorePointCheck', 'CancelButton', 'SessionReportButton',
+                  'ExtToolsList', 'ExtToolNameBox', 'ExtToolUrlBox', 'ExtToolAddButton', 'ExtToolRemoveButton',
                   'LogBox', 'Progress', 'StatusText') + $ActionButtons
     foreach ($name in $required) {
         if (-not $sync.Controls.ContainsKey($name) -or $null -eq $sync.Controls[$name]) { $issues += $name }
@@ -5651,6 +5849,14 @@ if ($SmokeTest) {
     # O autounattend.xml precisa ser XML válido.
     try { [xml](Get-GwtAutounattendXml -AccountName 'Teste') | Out-Null }
     catch { $issues += 'autounattend-xml-invalido' }
+
+    # As ferramentas externas precisam virar botões na lista.
+    if (@($sync.ExtTools).Count -gt 0) {
+        $botoesFerr = @($sync.Controls['ExtToolsList'].Children | Where-Object { $_ -is [System.Windows.Controls.Button] }).Count
+        if ($botoesFerr -ne @($sync.ExtTools).Count) {
+            $issues += "ferramentas-externas:$botoesFerr-de-$(@($sync.ExtTools).Count)"
+        }
+    }
 
     # O relatório de sessão precisa gerar HTML válido, com e sem ações.
     try {

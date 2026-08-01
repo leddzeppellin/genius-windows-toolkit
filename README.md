@@ -116,6 +116,7 @@ Botões de atalho **Só essenciais** e **Limpar**. Tudo com backup `.reg` antes.
 ## 🧩 Recursos e correções
 
 - **Recursos do Windows**: .NET 3.5, Hyper-V, WSL, Windows Sandbox, cliente NFS, componentes de mídia legados, Telnet, backup diário do registro e recuperação por F8.
+- **🧰 Ferramentas externas**: cadastre a URL de qualquer script de terceiros (`irm URL | iex`) e ela vira um botão. Cada ferramenta guarda nome, URL e se precisa de Administrador; ao clicar, o toolkit mostra a URL, pede confirmação e abre o script numa janela própria do PowerShell (essas ferramentas costumam ser interativas). O cadastro fica em `ferramentas.json` **ao lado do app** — ou seja, acompanha o pendrive — e cai para `%LOCALAPPDATA%` quando o toolkit roda por `irm | iex`. Vem com o WinUtil cadastrado como exemplo.
 - **Correções rápidas**: reparar sistema (DISM + SFC), resetar o Windows Update, reinstalar o winget e corrigir o relógio (NTP).
 - **Política de Windows Update**: Padrão (restaurar), Só segurança (mantém correções críticas, adia recursos por 1 ano, não reinicia com você logado) ou Desativar — com backup `.reg` antes.
 - **DNS**: aplicar Google, Cloudflare (e variante que bloqueia malware), OpenDNS, Quad9 ou AdGuard nos adaptadores ativos — ou voltar ao automático.
