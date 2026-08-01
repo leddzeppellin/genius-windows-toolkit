@@ -790,6 +790,22 @@ function Get-GwtToolsFile {
     return (Join-Path $sync.AppRoot 'ferramentas.json')
 }
 
+# Converte o link da PÁGINA do GitHub para o link RAW (que é o que o irm precisa).
+# Ex.: github.com/user/repo/blob/main/x.ps1 -> raw.githubusercontent.com/user/repo/main/x.ps1
+function Convert-GwtGitHubUrl {
+    param([string]$Url)
+    $u = ([string]$Url).Trim()
+
+    if ($u -match '^https?://github\.com/([^/]+)/([^/]+)/blob/(.+)$') {
+        return "https://raw.githubusercontent.com/$($Matches[1])/$($Matches[2])/$($Matches[3])"
+    }
+    # Link de "arquivo bruto" novo do GitHub (?raw=1 ou /raw/)
+    if ($u -match '^https?://github\.com/([^/]+)/([^/]+)/raw/(.+)$') {
+        return "https://raw.githubusercontent.com/$($Matches[1])/$($Matches[2])/$($Matches[3])"
+    }
+    return $u
+}
+
 function Get-GwtDefaultTools {
     @(
         [pscustomobject]@{
@@ -3907,10 +3923,12 @@ function Invoke-GwtRunspace {
                                                     <TextBox Grid.Column="1" Name="ExtToolUrlBox" VerticalContentAlignment="Center" ToolTip="Ex.: https://exemplo.com/script.ps1 — será executado com irm URL | iex"/>
                                                 </Grid>
                                                 <WrapPanel>
-                                                    <CheckBox Name="ExtToolAdminCheck" Content="Executar como Administrador" IsChecked="True" VerticalAlignment="Center" Margin="0,0,12,0" FontSize="12"/>
-                                                    <Button Name="ExtToolAddButton" Style="{StaticResource GhostButton}" Content="➕ Adicionar" Margin="0,0,8,0"/>
-                                                    <Button Name="ExtToolRemoveButton" Style="{StaticResource GhostButton}" Content="🗑 Remover..." Margin="0"/>
+                                                    <CheckBox Name="ExtToolAdminCheck" Content="Executar como Administrador" IsChecked="True" VerticalAlignment="Center" Margin="0,0,12,8" FontSize="12"/>
+                                                    <Button Name="ExtToolAddButton" Style="{StaticResource GhostButton}" Content="➕ Adicionar" Margin="0,0,8,8"/>
+                                                    <Button Name="ExtToolCancelButton" Style="{StaticResource GhostButton}" Content="✖ Cancelar edição" Margin="0,0,8,8" Visibility="Collapsed"/>
+                                                    <Button Name="ExtToolHelpButton" Style="{StaticResource GhostButton}" Content="❓ Onde acho a URL?" Margin="0,0,0,8"/>
                                                 </WrapPanel>
+                                                <TextBlock Text="Dica: clique com o botão direito numa ferramenta para editar ou remover. Pode colar o link da página do GitHub — ele é convertido para o link direto automaticamente." Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
                                             </StackPanel>
                                         </Border>
 
@@ -4532,6 +4550,36 @@ function Invoke-GwtExternalTool {
     }
 }
 
+function Start-GwtToolEdit {
+    param([object]$Ferramenta)
+    $sync.Controls['ExtToolNameBox'].Text = [string]$Ferramenta.Nome
+    $sync.Controls['ExtToolUrlBox'].Text = [string]$Ferramenta.Url
+    $sync.Controls['ExtToolAdminCheck'].IsChecked = [bool]$Ferramenta.Admin
+    $script:EditandoFerramenta = [string]$Ferramenta.Nome
+    $sync.Controls['ExtToolAddButton'].Content = '💾 Salvar alterações'
+    $sync.Controls['ExtToolCancelButton'].Visibility = 'Visible'
+    Add-GwtLog "Editando a ferramenta '$($Ferramenta.Nome)'. Altere os campos e clique em Salvar." 'Info'
+}
+
+function Stop-GwtToolEdit {
+    $script:EditandoFerramenta = $null
+    $sync.Controls['ExtToolNameBox'].Text = ''
+    $sync.Controls['ExtToolUrlBox'].Text = ''
+    $sync.Controls['ExtToolAdminCheck'].IsChecked = $true
+    $sync.Controls['ExtToolAddButton'].Content = '➕ Adicionar'
+    $sync.Controls['ExtToolCancelButton'].Visibility = 'Collapsed'
+}
+
+function Remove-GwtTool {
+    param([string]$Nome)
+    if ([System.Windows.MessageBox]::Show($Window, "Remover a ferramenta '$Nome'?", 'Confirmar remoção', 'YesNo', 'Question') -ne 'Yes') { return }
+    $sync.ExtTools = @($sync.ExtTools | Where-Object { [string]$_.Nome -ne $Nome })
+    Export-GwtTools
+    Update-GwtExtToolsList
+    if ($script:EditandoFerramenta -eq $Nome) { Stop-GwtToolEdit }
+    Add-GwtLog "Ferramenta removida: $Nome" 'Success'
+}
+
 function Update-GwtExtToolsList {
     $painel = $sync.Controls['ExtToolsList']
     $painel.Children.Clear()
@@ -4554,8 +4602,24 @@ function Update-GwtExtToolsList {
         $dica = [string]$ferr.Url
         if ($ferr.PSObject.Properties.Name -contains 'Desc' -and $ferr.Desc) { $dica = "$($ferr.Desc)`n$dica" }
         if ([bool]$ferr.Admin) { $dica += "`n(executa como Administrador)" }
-        $btn.ToolTip = $dica
+        $btn.ToolTip = "$dica`n`n(botão direito: editar ou remover)"
         $btn.Add_Click({ Invoke-GwtExternalTool -Ferramenta $this.Tag })
+
+        # Menu de contexto: editar / remover
+        $menu = New-Object System.Windows.Controls.ContextMenu
+        $miEditar = New-Object System.Windows.Controls.MenuItem
+        $miEditar.Header = '✏  Editar'
+        $miEditar.Tag = $ferr
+        $miEditar.Add_Click({ Start-GwtToolEdit -Ferramenta $this.Tag })
+        [void]$menu.Items.Add($miEditar)
+
+        $miRemover = New-Object System.Windows.Controls.MenuItem
+        $miRemover.Header = '🗑  Remover'
+        $miRemover.Tag = $ferr
+        $miRemover.Add_Click({ Remove-GwtTool -Nome ([string]$this.Tag.Nome) })
+        [void]$menu.Items.Add($miRemover)
+
+        $btn.ContextMenu = $menu
         [void]$painel.Children.Add($btn)
     }
 }
@@ -5471,6 +5535,8 @@ $sync.Controls['CancelButton'].Add_Click({
     Add-GwtLog 'Cancelamento solicitado — a operação para após concluir o item atual.' 'Warn'
 })
 
+$script:EditandoFerramenta = $null
+
 $sync.Controls['ExtToolAddButton'].Add_Click({
     $nome = ([string]$sync.Controls['ExtToolNameBox'].Text).Trim()
     $url = ([string]$sync.Controls['ExtToolUrlBox'].Text).Trim()
@@ -5479,13 +5545,29 @@ $sync.Controls['ExtToolAddButton'].Add_Click({
         [System.Windows.MessageBox]::Show($Window, 'Informe o nome e a URL da ferramenta.', 'Campos obrigatórios', 'OK', 'Warning') | Out-Null
         return
     }
+
+    # Link da página do GitHub -> link direto (raw)
+    $convertida = Convert-GwtGitHubUrl -Url $url
+    if ($convertida -ne $url) {
+        Add-GwtLog "URL do GitHub convertida para o link direto: $convertida" 'Info'
+        $url = $convertida
+        $sync.Controls['ExtToolUrlBox'].Text = $url
+    }
+
     if ($url -notmatch '^https://') {
         $aviso = "A URL não começa com https://.`n`nBaixar scripts por HTTP não é seguro (podem ser alterados no caminho).`n`nCadastrar mesmo assim?"
         if ([System.Windows.MessageBox]::Show($Window, $aviso, 'URL sem HTTPS', 'YesNo', 'Warning') -ne 'Yes') { return }
     }
 
+    $antigo = $script:EditandoFerramenta
     $lista = New-Object System.Collections.Generic.List[object]
-    foreach ($t in $sync.ExtTools) { if ([string]$t.Nome -ne $nome) { $lista.Add($t) } }
+    foreach ($t in $sync.ExtTools) {
+        $n = [string]$t.Nome
+        # Remove a entrada sendo editada (permite renomear) e duplicatas do novo nome
+        if ($n -eq $nome) { continue }
+        if ($antigo -and $n -eq $antigo) { continue }
+        $lista.Add($t)
+    }
     $lista.Add([pscustomobject]@{
         Nome  = $nome
         Url   = $url
@@ -5496,32 +5578,36 @@ $sync.Controls['ExtToolAddButton'].Add_Click({
     Export-GwtTools
     Update-GwtExtToolsList
 
-    $sync.Controls['ExtToolNameBox'].Text = ''
-    $sync.Controls['ExtToolUrlBox'].Text = ''
-    Add-GwtLog "Ferramenta cadastrada: $nome ($url)" 'Success'
+    if ($antigo) { Add-GwtLog "Ferramenta atualizada: $nome ($url)" 'Success' }
+    else { Add-GwtLog "Ferramenta cadastrada: $nome ($url)" 'Success' }
+    Stop-GwtToolEdit
 })
 
-$sync.Controls['ExtToolRemoveButton'].Add_Click({
-    if (@($sync.ExtTools).Count -eq 0) { return }
-    $nomes = @($sync.ExtTools | ForEach-Object { $_.Nome })
-    $lista = ($nomes | ForEach-Object { "  • $_" }) -join "`n"
-    $alvo = ([string]$sync.Controls['ExtToolNameBox'].Text).Trim()
+$sync.Controls['ExtToolCancelButton'].Add_Click({ Stop-GwtToolEdit })
 
-    if ([string]::IsNullOrWhiteSpace($alvo)) {
-        [System.Windows.MessageBox]::Show($Window, "Para remover, digite o nome exato da ferramenta no campo Nome e clique em Remover.`n`nCadastradas:`n$lista", 'Remover ferramenta', 'OK', 'Information') | Out-Null
-        return
-    }
-    if ($nomes -notcontains $alvo) {
-        [System.Windows.MessageBox]::Show($Window, "Não existe ferramenta chamada '$alvo'.`n`nCadastradas:`n$lista", 'Não encontrada', 'OK', 'Warning') | Out-Null
-        return
-    }
-    if ([System.Windows.MessageBox]::Show($Window, "Remover a ferramenta '$alvo'?", 'Confirmar remoção', 'YesNo', 'Question') -ne 'Yes') { return }
+$sync.Controls['ExtToolHelpButton'].Add_Click({
+    $texto = @"
+A URL precisa apontar para o ARQUIVO do script, não para a página do projeto.
 
-    $sync.ExtTools = @($sync.ExtTools | Where-Object { [string]$_.Nome -ne $alvo })
-    Export-GwtTools
-    Update-GwtExtToolsList
-    $sync.Controls['ExtToolNameBox'].Text = ''
-    Add-GwtLog "Ferramenta removida: $alvo" 'Success'
+1) Muitos projetos publicam o comando pronto no README, por exemplo:
+   irm https://christitus.com/win | iex
+   Nesse caso, use só a parte do endereço (https://christitus.com/win).
+
+2) Se o projeto não tem endereço curto, pegue o link direto no GitHub:
+   - Abra o arquivo .ps1 no repositório
+   - Clique no botão "Raw" (ou "Bruto")
+   - Copie o endereço da barra do navegador
+   Ele ficará assim:
+   https://raw.githubusercontent.com/usuario/repositorio/main/script.ps1
+
+3) Atalho: você pode simplesmente colar aqui o link da PÁGINA do arquivo
+   (github.com/usuario/repo/blob/main/script.ps1) — o toolkit converte
+   sozinho para o link direto ao cadastrar.
+
+Dica: prefira sempre endereços https:// de projetos que você conhece; o
+script será baixado e executado nesta máquina.
+"@
+    [System.Windows.MessageBox]::Show($Window, $texto, 'Como encontrar a URL do script', 'OK', 'Information') | Out-Null
 })
 
 $sync.Controls['SessionReportButton'].Add_Click({
@@ -5834,7 +5920,7 @@ if ($SmokeTest) {
                   'IsoKeepEditionsCheck', 'IsoDriverFolderBox', 'IsoExtraFolderBox',
                   'KitOpenButton', 'MonitorIntervalBox', 'MonitorPresetCheck',
                   'RestorePointCheck', 'CancelButton', 'SessionReportButton',
-                  'ExtToolsList', 'ExtToolNameBox', 'ExtToolUrlBox', 'ExtToolAddButton', 'ExtToolRemoveButton',
+                  'ExtToolsList', 'ExtToolNameBox', 'ExtToolUrlBox', 'ExtToolAddButton', 'ExtToolCancelButton', 'ExtToolHelpButton',
                   'LogBox', 'Progress', 'StatusText') + $ActionButtons
     foreach ($name in $required) {
         if (-not $sync.Controls.ContainsKey($name) -or $null -eq $sync.Controls[$name]) { $issues += $name }
