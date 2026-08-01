@@ -117,6 +117,7 @@ Botões de atalho **Só essenciais** e **Limpar**. Tudo com backup `.reg` antes.
 
 - **Recursos do Windows**: .NET 3.5, Hyper-V, WSL, Windows Sandbox, cliente NFS, componentes de mídia legados, Telnet, backup diário do registro e recuperação por F8.
 - **🧰 Ferramentas externas**: cadastre a URL de qualquer script de terceiros (`irm URL | iex`) e ela vira um botão. Cada ferramenta guarda nome, URL e se precisa de Administrador; ao clicar, o toolkit mostra a URL, pede confirmação e abre o script numa janela própria do PowerShell (essas ferramentas costumam ser interativas).
+  - **PowerShell ou CMD**: scripts `.ps1` rodam direto por `irm | iex`; scripts `.cmd`/`.bat` são baixados para a pasta temporária e executados no Prompt de Comando. O tipo é detectado pela extensão da URL e pode ser marcado à mão (útil para links encurtados).
   - **Editar/remover**: clique com o botão direito na ferramenta.
   - **Não sabe a URL?** Cole o link da **página do arquivo no GitHub** (`github.com/user/repo/blob/main/script.ps1`) que o toolkit converte sozinho para o link direto. O botão **"Onde acho a URL?"** explica as três formas de obtê-la.
   - O cadastro fica em `ferramentas.json` **ao lado do app** — ou seja, acompanha o pendrive — e cai para `%LOCALAPPDATA%` quando o toolkit roda por `irm | iex`. Vem com o WinUtil cadastrado como exemplo.

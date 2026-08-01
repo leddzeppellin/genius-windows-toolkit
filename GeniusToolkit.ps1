@@ -3944,7 +3944,9 @@ function Invoke-GwtRunspace {
                                                     <TextBox Grid.Column="1" Name="ExtToolUrlBox" VerticalContentAlignment="Center" ToolTip="Ex.: https://exemplo.com/script.ps1 — será executado com irm URL | iex"/>
                                                 </Grid>
                                                 <WrapPanel>
-                                                    <CheckBox Name="ExtToolAdminCheck" Content="Executar como Administrador" IsChecked="True" VerticalAlignment="Center" Margin="0,0,12,8" FontSize="12"/>
+                                                    <CheckBox Name="ExtToolAdminCheck" Content="Como Administrador" IsChecked="True" VerticalAlignment="Center" Margin="0,0,12,8" FontSize="12"/>
+                                                    <CheckBox Name="ExtToolCmdCheck" Content="Script .cmd/.bat" VerticalAlignment="Center" Margin="0,0,12,8" FontSize="12"
+                                                              ToolTip="Marque se o script é batch (.cmd/.bat) em vez de PowerShell. É detectado sozinho pela extensão da URL."/>
                                                     <Button Name="ExtToolAddButton" Style="{StaticResource GhostButton}" Content="➕ Adicionar" Margin="0,0,8,8"/>
                                                     <Button Name="ExtToolCancelButton" Style="{StaticResource GhostButton}" Content="✖ Cancelar edição" Margin="0,0,8,8" Visibility="Collapsed"/>
                                                     <Button Name="ExtToolHelpButton" Style="{StaticResource GhostButton}" Content="❓ Onde acho a URL?" Margin="0,0,0,8"/>
@@ -4543,31 +4545,58 @@ foreach ($name in $DnsProviders.Keys) {
 $sync.Controls['DnsCombo'].SelectedIndex = 0
 
 # --- Ferramentas externas ---
+# Detecta se a URL aponta para um script de linha de comando (.cmd/.bat)
+function Test-GwtIsCmdScript {
+    param([string]$Url)
+    return ([string]$Url -match '\.(cmd|bat)(\?|$)')
+}
+
 function Invoke-GwtExternalTool {
     param([object]$Ferramenta)
 
     $url = [string]$Ferramenta.Url
     $nome = [string]$Ferramenta.Nome
     $admin = [bool]$Ferramenta.Admin
+    $ehCmd = $false
+    if ($Ferramenta.PSObject.Properties.Name -contains 'Tipo') { $ehCmd = ([string]$Ferramenta.Tipo -eq 'CMD') }
+    else { $ehCmd = Test-GwtIsCmdScript -Url $url }
 
-    $msg = "Executar a ferramenta externa:`n`n$nome`n$url`n`n" +
+    $motor = if ($ehCmd) { 'Prompt de Comando (.cmd/.bat)' } else { 'PowerShell' }
+    $msg = "Executar a ferramenta externa:`n`n$nome`n$url`n`nInterpretador: $motor`n`n" +
            "Isso baixa e executa um script de terceiros nesta máquina" +
            $(if ($admin) { ' com privilégios de Administrador' } else { '' }) + ".`n" +
            "Confira se a URL é de fonte confiável.`n`nContinuar?"
     if ([System.Windows.MessageBox]::Show($Window, $msg, 'Ferramenta externa', 'YesNo', 'Warning') -ne 'Yes') { return }
 
     try {
-        # Abre em janela própria: essas ferramentas costumam ser interativas
-        $cmd = "irm '$url' | iex"
-        $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-Command', $cmd)
-        if ($admin) { Start-Process powershell.exe -ArgumentList $args -Verb RunAs }
-        else { Start-Process powershell.exe -ArgumentList $args }
+        if ($ehCmd) {
+            # Batch não pode ser interpretado pelo PowerShell: baixa para um
+            # arquivo temporário e executa no cmd.exe, em janela própria.
+            $seguro = ($nome -replace '[^A-Za-z0-9_-]', '_')
+            $destino = Join-Path $env:TEMP ("gwt_{0}_{1}.cmd" -f $seguro, (Get-Date -Format 'HHmmss'))
+            Add-GwtLog "Baixando script de comando para: $destino"
+            Invoke-WebRequest -Uri $url -OutFile $destino -UseBasicParsing
+            if (-not (Test-Path -LiteralPath $destino)) { throw 'O download não gerou arquivo.' }
 
-        Add-GwtLog "Ferramenta externa iniciada em nova janela: $nome ($url)" 'Success'
+            $cmdArgs = @('/k', "`"$destino`"")
+            if ($admin) { Start-Process cmd.exe -ArgumentList $cmdArgs -Verb RunAs }
+            else { Start-Process cmd.exe -ArgumentList $cmdArgs }
+        }
+        else {
+            # PowerShell: executa direto, em janela própria (costumam ser interativas)
+            $cmd = "irm '$url' | iex"
+            $psArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-Command', $cmd)
+            if ($admin) { Start-Process powershell.exe -ArgumentList $psArgs -Verb RunAs }
+            else { Start-Process powershell.exe -ArgumentList $psArgs }
+        }
+
+        Add-GwtLog "Ferramenta externa iniciada em nova janela ($motor): $nome" 'Success'
         Add-GwtAction -Categoria 'Ferramentas externas' -Item $nome -Resultado 'OK' -Detalhe $url
     }
     catch {
         Add-GwtLog "Falha ao iniciar '$nome': $($_.Exception.Message)" 'Error'
+        Request-GwtUi @{ Action = 'Message'; Title = 'Erro na ferramenta'; Kind = 'Error'
+                         Text = "Não foi possível executar '$nome':`n`n$($_.Exception.Message)" }
     }
 }
 
@@ -4576,6 +4605,9 @@ function Start-GwtToolEdit {
     $sync.Controls['ExtToolNameBox'].Text = [string]$Ferramenta.Nome
     $sync.Controls['ExtToolUrlBox'].Text = [string]$Ferramenta.Url
     $sync.Controls['ExtToolAdminCheck'].IsChecked = [bool]$Ferramenta.Admin
+    $ehCmd = if ($Ferramenta.PSObject.Properties.Name -contains 'Tipo') { [string]$Ferramenta.Tipo -eq 'CMD' }
+             else { Test-GwtIsCmdScript -Url ([string]$Ferramenta.Url) }
+    $sync.Controls['ExtToolCmdCheck'].IsChecked = $ehCmd
     $script:EditandoFerramenta = [string]$Ferramenta.Nome
     $sync.Controls['ExtToolAddButton'].Content = '💾 Salvar alterações'
     $sync.Controls['ExtToolCancelButton'].Visibility = 'Visible'
@@ -4587,6 +4619,7 @@ function Stop-GwtToolEdit {
     $sync.Controls['ExtToolNameBox'].Text = ''
     $sync.Controls['ExtToolUrlBox'].Text = ''
     $sync.Controls['ExtToolAdminCheck'].IsChecked = $true
+    $sync.Controls['ExtToolCmdCheck'].IsChecked = $false
     $sync.Controls['ExtToolAddButton'].Content = '➕ Adicionar'
     $sync.Controls['ExtToolCancelButton'].Visibility = 'Collapsed'
 }
@@ -4622,6 +4655,9 @@ function Update-GwtExtToolsList {
         $btn.Tag = $ferr
         $dica = [string]$ferr.Url
         if ($ferr.PSObject.Properties.Name -contains 'Desc' -and $ferr.Desc) { $dica = "$($ferr.Desc)`n$dica" }
+        $tipoTxt = if (($ferr.PSObject.Properties.Name -contains 'Tipo' -and [string]$ferr.Tipo -eq 'CMD') -or
+                       (Test-GwtIsCmdScript -Url ([string]$ferr.Url))) { 'Prompt de Comando' } else { 'PowerShell' }
+        $dica += "`nInterpretador: $tipoTxt"
         if ([bool]$ferr.Admin) { $dica += "`n(executa como Administrador)" }
         $btn.ToolTip = "$dica`n`n(botão direito: editar ou remover)"
         $btn.Add_Click({ Invoke-GwtExternalTool -Ferramenta $this.Tag })
@@ -5601,6 +5637,7 @@ $sync.Controls['ExtToolAddButton'].Add_Click({
         Nome  = $nome
         Url   = $url
         Admin = [bool]$sync.Controls['ExtToolAdminCheck'].IsChecked
+        Tipo  = $(if ([bool]$sync.Controls['ExtToolCmdCheck'].IsChecked) { 'CMD' } else { 'PS' })
         Desc  = ''
     })
     $sync.ExtTools = $lista.ToArray()
@@ -5613,6 +5650,13 @@ $sync.Controls['ExtToolAddButton'].Add_Click({
 })
 
 $sync.Controls['ExtToolCancelButton'].Add_Click({ Stop-GwtToolEdit })
+
+# Marca sozinho o tipo do script conforme a extensão digitada
+$sync.Controls['ExtToolUrlBox'].Add_TextChanged({
+    if (Test-GwtIsCmdScript -Url ([string]$sync.Controls['ExtToolUrlBox'].Text)) {
+        $sync.Controls['ExtToolCmdCheck'].IsChecked = $true
+    }
+})
 
 $sync.Controls['ExtToolHelpButton'].Add_Click({
     $texto = @"
@@ -5949,7 +5993,7 @@ if ($SmokeTest) {
                   'IsoKeepEditionsCheck', 'IsoDriverFolderBox', 'IsoExtraFolderBox',
                   'KitOpenButton', 'MonitorIntervalBox', 'MonitorPresetCheck',
                   'RestorePointCheck', 'CancelButton', 'SessionReportButton',
-                  'ExtToolsList', 'ExtToolNameBox', 'ExtToolUrlBox', 'ExtToolAddButton', 'ExtToolCancelButton', 'ExtToolHelpButton',
+                  'ExtToolsList', 'ExtToolNameBox', 'ExtToolUrlBox', 'ExtToolAddButton', 'ExtToolCancelButton', 'ExtToolHelpButton', 'ExtToolCmdCheck',
                   'LogBox', 'Progress', 'StatusText') + $ActionButtons
     foreach ($name in $required) {
         if (-not $sync.Controls.ContainsKey($name) -or $null -eq $sync.Controls[$name]) { $issues += $name }
