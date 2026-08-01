@@ -96,6 +96,7 @@ $sync.IsoReady       = $false   # install.wim já modificado, pronto para export
 $sync.IsoUsbDisks    = @()
 $sync.KitUpdates     = @()      # apps do kit com atualização disponível
 $sync.KitDir         = $null
+$sync.IsoAppxList    = @()      # AppX provisionados encontrados na ISO montada
 
 New-Item -ItemType Directory -Path $sync.BackupRoot, $sync.LogRoot, $sync.ReportRoot -Force | Out-Null
 
@@ -489,6 +490,21 @@ $LegacyPanels = @(
     [pscustomobject]@{ Name='Restauração do Sistema';      Cmd='rstrui.exe' }
     [pscustomobject]@{ Name='Data e Hora';                 Cmd='timedate.cpl' }
     [pscustomobject]@{ Name='Região';                      Cmd='intl.cpl' }
+)
+
+# --- Ajustes aplicados na imagem da ISO (aba Criar ISO) ---
+# Perfis: Conservador (só o essencial), Recomendado (padrão) e Agressivo (tudo).
+$IsoTweaks = @(
+    [pscustomobject]@{ Key='Bypass';            Name='Bypass de requisitos (TPM, Secure Boot, CPU, RAM)'; Perfis=@('Conservador','Recomendado','Agressivo') }
+    [pscustomobject]@{ Key='LocalAccount';      Name='Permitir conta local no OOBE (BypassNRO)';          Perfis=@('Conservador','Recomendado','Agressivo') }
+    [pscustomobject]@{ Key='Sponsored';         Name='Desativar apps patrocinados e sugestões';           Perfis=@('Recomendado','Agressivo') }
+    [pscustomobject]@{ Key='Telemetry';         Name='Desativar telemetria';                              Perfis=@('Recomendado','Agressivo') }
+    [pscustomobject]@{ Key='TelemetryTasks';    Name='Remover tarefas agendadas de telemetria/CEIP';      Perfis=@('Recomendado','Agressivo') }
+    [pscustomobject]@{ Key='Copilot';           Name='Desativar Copilot e ícone do Chat';                 Perfis=@('Recomendado','Agressivo') }
+    [pscustomobject]@{ Key='OneDriveBackup';    Name='Desativar backup automático do OneDrive';           Perfis=@('Recomendado','Agressivo') }
+    [pscustomobject]@{ Key='NoBitLocker';       Name='Impedir criptografia automática (BitLocker)';       Perfis=@('Recomendado','Agressivo') }
+    [pscustomobject]@{ Key='BlockTeamsOutlook'; Name='Bloquear instalação de Teams e novo Outlook';       Perfis=@('Agressivo') }
+    [pscustomobject]@{ Key='ReservedStorage';   Name='Desativar Armazenamento Reservado (~7 GB)';         Perfis=@('Agressivo') }
 )
 
 # --- Servidores DNS (aba Recursos) ---
@@ -2347,6 +2363,29 @@ function Invoke-GwtIsoMountWorker {
         $sync.IsoWimPath = $active
         $sync.IsoEditions = @($editions | ForEach-Object { "$($_.ImageIndex): $($_.ImageName)" })
 
+        # Lista os AppX provisionados REAIS desta imagem, para o usuário escolher
+        # o que remover (em vez de uma lista fixa que pode não bater com a ISO).
+        $sync.StatusText = 'Lendo apps pré-instalados da imagem...'
+        $sync.IsoAppxList = @()
+        try {
+            $idx = if ($editions.Count -gt 0) { $editions[0].ImageIndex } else { 1 }
+            $found = New-Object System.Collections.Generic.List[object]
+            & dism /English "/Get-ProvisionedAppxPackages" "/PackagePath:$active" "/Index:$idx" 2>&1 | ForEach-Object {
+                if ([string]$_ -match '^\s*(?:DisplayName|Nome de exibi.*?)\s*:\s*(.+?)\s*$') { $script:lastDisplay = $Matches[1] }
+                if ([string]$_ -match '^\s*PackageName\s*:\s*(.+?)\s*$') {
+                    $full = $Matches[1]
+                    $nome = if ($script:lastDisplay) { $script:lastDisplay } else { ($full -split '_')[0] }
+                    $found.Add([pscustomobject]@{ Name = $nome; PackageName = $full })
+                    $script:lastDisplay = $null
+                }
+            }
+            $sync.IsoAppxList = $found.ToArray()
+            Add-GwtLog "Apps pré-instalados encontrados na imagem: $($sync.IsoAppxList.Count)" 'Success'
+        }
+        catch {
+            Add-GwtLog "Não foi possível listar os apps da imagem: $($_.Exception.Message)" 'Warn'
+        }
+
         Request-GwtUi @{ Action = 'IsoEditions' }
     }
     catch {
@@ -2360,100 +2399,131 @@ function Invoke-GwtIsoMountWorker {
 }
 
 function Invoke-GwtIsoApplyDebloat {
-    param([string]$MountDir, [string]$IsoContents, [string]$EditionId)
-
-    # 1. Remover AppX provisionados (bloatware)
-    Add-GwtLog 'Removendo pacotes AppX provisionados...'
-    $prefixes = @(
-        'Clipchamp.Clipchamp', 'Microsoft.BingNews', 'Microsoft.BingSearch', 'Microsoft.BingWeather',
-        'Microsoft.GetHelp', 'Microsoft.MicrosoftOfficeHub', 'Microsoft.MicrosoftSolitaireCollection',
-        'Microsoft.MicrosoftStickyNotes', 'Microsoft.OutlookForWindows', 'Microsoft.PowerAutomateDesktop',
-        'Microsoft.StartExperiencesApp', 'Microsoft.Todos', 'Microsoft.Windows.DevHome',
-        'Microsoft.WindowsFeedbackHub', 'Microsoft.WindowsSoundRecorder', 'Microsoft.ZuneMusic',
-        'MicrosoftCorporationII.QuickAssist', 'MSTeams'
+    param(
+        [string]$MountDir,
+        [string]$IsoContents,
+        [string]$EditionId,
+        [string[]]$Tweaks = @(),      # chaves de $IsoTweaks selecionadas
+        [string[]]$AppsToRemove = @() # PackageName completos escolhidos pelo usuário
     )
-    $provisioned = & dism /English "/image:$MountDir" /Get-ProvisionedAppxPackages |
-        ForEach-Object { if ($_ -match 'PackageName : (.*)') { $Matches[1] } }
-    foreach ($pkg in $provisioned) {
-        if ($prefixes | Where-Object { $pkg -like "*$_*" }) {
+
+    $has = { param($k) $Tweaks -contains $k }
+
+    # 1. Remover apenas os AppX que o usuário marcou
+    if ($AppsToRemove.Count -gt 0) {
+        Add-GwtLog "Removendo $($AppsToRemove.Count) pacote(s) AppX provisionado(s)..."
+        foreach ($pkg in $AppsToRemove) {
             & dism /English "/image:$MountDir" /Remove-ProvisionedAppxPackage "/PackageName:$pkg" 2>&1 | Out-Null
-            Add-GwtLog "  removido: $pkg"
+            if ($LASTEXITCODE -eq 0) { Add-GwtLog "  removido: $pkg" }
+            else { Add-GwtLog "  não removido (código $LASTEXITCODE): $pkg" 'Warn' }
         }
+    }
+    else {
+        Add-GwtLog 'Nenhum app marcado para remoção — imagem mantém todos os AppX.'
     }
 
     # 2. Tweaks offline via hives montadas
-    Add-GwtLog 'Carregando hives offline do registro...'
-    & reg.exe load 'HKLM\zDEFAULT' "$MountDir\Windows\System32\config\default" 2>&1 | Out-Null
-    & reg.exe load 'HKLM\zNTUSER'  "$MountDir\Users\Default\ntuser.dat" 2>&1 | Out-Null
-    & reg.exe load 'HKLM\zSOFTWARE' "$MountDir\Windows\System32\config\SOFTWARE" 2>&1 | Out-Null
-    & reg.exe load 'HKLM\zSYSTEM'  "$MountDir\Windows\System32\config\SYSTEM" 2>&1 | Out-Null
+    if ($Tweaks.Count -gt 0) {
+        Add-GwtLog 'Carregando hives offline do registro...'
+        & reg.exe load 'HKLM\zDEFAULT' "$MountDir\Windows\System32\config\default" 2>&1 | Out-Null
+        & reg.exe load 'HKLM\zNTUSER'  "$MountDir\Users\Default\ntuser.dat" 2>&1 | Out-Null
+        & reg.exe load 'HKLM\zSOFTWARE' "$MountDir\Windows\System32\config\SOFTWARE" 2>&1 | Out-Null
+        & reg.exe load 'HKLM\zSYSTEM'  "$MountDir\Windows\System32\config\SYSTEM" 2>&1 | Out-Null
 
-    Add-GwtLog 'Aplicando bypass de requisitos (TPM/SecureBoot/CPU/RAM)...'
-    $labconfig = 'HKLM\zSYSTEM\Setup\LabConfig'
-    foreach ($n in 'BypassCPUCheck', 'BypassRAMCheck', 'BypassSecureBootCheck', 'BypassStorageCheck', 'BypassTPMCheck') {
-        Set-GwtOfflineReg -Path $labconfig -Name $n -Type 'REG_DWORD' -Value '1'
+        if (& $has 'Bypass') {
+            Add-GwtLog 'Aplicando bypass de requisitos (TPM/SecureBoot/CPU/RAM)...'
+            $labconfig = 'HKLM\zSYSTEM\Setup\LabConfig'
+            foreach ($n in 'BypassCPUCheck', 'BypassRAMCheck', 'BypassSecureBootCheck', 'BypassStorageCheck', 'BypassTPMCheck') {
+                Set-GwtOfflineReg -Path $labconfig -Name $n -Type 'REG_DWORD' -Value '1'
+            }
+            Set-GwtOfflineReg -Path 'HKLM\zSYSTEM\Setup\MoSetup' -Name 'AllowUpgradesWithUnsupportedTPMOrCPU' -Type 'REG_DWORD' -Value '1'
+            foreach ($hive in 'zDEFAULT', 'zNTUSER') {
+                Set-GwtOfflineReg -Path "HKLM\$hive\Control Panel\UnsupportedHardwareNotificationCache" -Name 'SV1' -Type 'REG_DWORD' -Value '0'
+                Set-GwtOfflineReg -Path "HKLM\$hive\Control Panel\UnsupportedHardwareNotificationCache" -Name 'SV2' -Type 'REG_DWORD' -Value '0'
+            }
+        }
+
+        if (& $has 'Sponsored') {
+            Add-GwtLog 'Desativando apps patrocinados e sugestões...'
+            $cdm = 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'
+            foreach ($n in 'OemPreInstalledAppsEnabled', 'PreInstalledAppsEnabled', 'SilentInstalledAppsEnabled',
+                           'ContentDeliveryAllowed', 'FeatureManagementEnabled', 'PreInstalledAppsEverEnabled',
+                           'SoftLandingEnabled', 'SubscribedContentEnabled', 'SystemPaneSuggestionsEnabled') {
+                Set-GwtOfflineReg -Path $cdm -Name $n -Type 'REG_DWORD' -Value '0'
+            }
+            foreach ($n in 'DisableWindowsConsumerFeatures', 'DisableConsumerAccountStateContent', 'DisableCloudOptimizedContent') {
+                Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' -Name $n -Type 'REG_DWORD' -Value '1'
+            }
+        }
+
+        if (& $has 'LocalAccount') {
+            Add-GwtLog 'Permitindo conta local no OOBE...'
+            Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' -Name 'BypassNRO' -Type 'REG_DWORD' -Value '1'
+        }
+
+        if (& $has 'Telemetry') {
+            Add-GwtLog 'Desativando telemetria...'
+            Set-GwtOfflineReg -Path 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo' -Name 'Enabled' -Type 'REG_DWORD' -Value '0'
+            Set-GwtOfflineReg -Path 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\Privacy' -Name 'TailoredExperiencesWithDiagnosticDataEnabled' -Type 'REG_DWORD' -Value '0'
+            Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\DataCollection' -Name 'AllowTelemetry' -Type 'REG_DWORD' -Value '0'
+            Set-GwtOfflineReg -Path 'HKLM\zSYSTEM\ControlSet001\Services\dmwappushservice' -Name 'Start' -Type 'REG_DWORD' -Value '4'
+        }
+
+        if (& $has 'Copilot') {
+            Add-GwtLog 'Desativando Copilot e ícone do Chat...'
+            Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsCopilot' -Name 'TurnOffWindowsCopilot' -Type 'REG_DWORD' -Value '1'
+            Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Chat' -Name 'ChatIcon' -Type 'REG_DWORD' -Value '3'
+            Set-GwtOfflineReg -Path 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'TaskbarMn' -Type 'REG_DWORD' -Value '0'
+        }
+
+        if (& $has 'OneDriveBackup') {
+            Add-GwtLog 'Desativando backup automático do OneDrive...'
+            Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\OneDrive' -Name 'DisableFileSyncNGSC' -Type 'REG_DWORD' -Value '1'
+        }
+
+        if (& $has 'ReservedStorage') {
+            Add-GwtLog 'Desativando Armazenamento Reservado...'
+            Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager' -Name 'ShippedWithReserves' -Type 'REG_DWORD' -Value '0'
+        }
+
+        if (& $has 'NoBitLocker') {
+            Add-GwtLog 'Impedindo criptografia automática de dispositivo...'
+            Set-GwtOfflineReg -Path 'HKLM\zSYSTEM\ControlSet001\Control\BitLocker' -Name 'PreventDeviceEncryption' -Type 'REG_DWORD' -Value '1'
+        }
+
+        if (& $has 'BlockTeamsOutlook') {
+            Add-GwtLog 'Impedindo instalação de Teams e novo Outlook...'
+            Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Teams' -Name 'DisableInstallation' -Type 'REG_DWORD' -Value '1'
+            Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Orchestrator\UScheduler\OutlookUpdate' -Name 'workCompleted' -Type 'REG_DWORD' -Value '1'
+            Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Orchestrator\UScheduler\DevHomeUpdate' -Name 'workCompleted' -Type 'REG_DWORD' -Value '1'
+        }
+
+        # NOTA DE SEGURANÇA: NÃO desativamos os serviços do Windows Update aqui.
+        # Fazer isso deixaria a instalação sem atualizações; preferimos o WU funcional.
+
+        Add-GwtLog 'Descarregando hives offline...'
+        [gc]::Collect()
+        foreach ($h in 'zDEFAULT', 'zNTUSER', 'zSOFTWARE', 'zSYSTEM') {
+            & reg.exe unload "HKLM\$h" 2>&1 | Out-Null
+        }
     }
-    Set-GwtOfflineReg -Path 'HKLM\zSYSTEM\Setup\MoSetup' -Name 'AllowUpgradesWithUnsupportedTPMOrCPU' -Type 'REG_DWORD' -Value '1'
-    Set-GwtOfflineReg -Path 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' -Name 'SV1' -Type 'REG_DWORD' -Value '0'
-    Set-GwtOfflineReg -Path 'HKLM\zDEFAULT\Control Panel\UnsupportedHardwareNotificationCache' -Name 'SV2' -Type 'REG_DWORD' -Value '0'
-    Set-GwtOfflineReg -Path 'HKLM\zNTUSER\Control Panel\UnsupportedHardwareNotificationCache' -Name 'SV1' -Type 'REG_DWORD' -Value '0'
-    Set-GwtOfflineReg -Path 'HKLM\zNTUSER\Control Panel\UnsupportedHardwareNotificationCache' -Name 'SV2' -Type 'REG_DWORD' -Value '0'
-
-    Add-GwtLog 'Desativando apps patrocinados e sugestões...'
-    $cdm = 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager'
-    foreach ($n in 'OemPreInstalledAppsEnabled', 'PreInstalledAppsEnabled', 'SilentInstalledAppsEnabled',
-                   'ContentDeliveryAllowed', 'FeatureManagementEnabled', 'PreInstalledAppsEverEnabled',
-                   'SoftLandingEnabled', 'SubscribedContentEnabled', 'SystemPaneSuggestionsEnabled') {
-        Set-GwtOfflineReg -Path $cdm -Name $n -Type 'REG_DWORD' -Value '0'
-    }
-    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' -Name 'DisableWindowsConsumerFeatures' -Type 'REG_DWORD' -Value '1'
-    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' -Name 'DisableConsumerAccountStateContent' -Type 'REG_DWORD' -Value '1'
-    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\CloudContent' -Name 'DisableCloudOptimizedContent' -Type 'REG_DWORD' -Value '1'
-
-    Add-GwtLog 'Permitindo conta local no OOBE...'
-    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\OOBE' -Name 'BypassNRO' -Type 'REG_DWORD' -Value '1'
-
-    Add-GwtLog 'Desativando telemetria...'
-    Set-GwtOfflineReg -Path 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\AdvertisingInfo' -Name 'Enabled' -Type 'REG_DWORD' -Value '0'
-    Set-GwtOfflineReg -Path 'HKLM\zNTUSER\Software\Microsoft\Windows\CurrentVersion\Privacy' -Name 'TailoredExperiencesWithDiagnosticDataEnabled' -Type 'REG_DWORD' -Value '0'
-    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\DataCollection' -Name 'AllowTelemetry' -Type 'REG_DWORD' -Value '0'
-    Set-GwtOfflineReg -Path 'HKLM\zSYSTEM\ControlSet001\Services\dmwappushservice' -Name 'Start' -Type 'REG_DWORD' -Value '4'
-
-    Add-GwtLog 'Desativando Copilot, Chat e backup do OneDrive...'
-    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\WindowsCopilot' -Name 'TurnOffWindowsCopilot' -Type 'REG_DWORD' -Value '1'
-    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\Windows Chat' -Name 'ChatIcon' -Type 'REG_DWORD' -Value '3'
-    Set-GwtOfflineReg -Path 'HKLM\zNTUSER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name 'TaskbarMn' -Type 'REG_DWORD' -Value '0'
-    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Windows\OneDrive' -Name 'DisableFileSyncNGSC' -Type 'REG_DWORD' -Value '1'
-
-    Add-GwtLog 'Desativando Armazenamento Reservado e criptografia automática...'
-    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\ReserveManager' -Name 'ShippedWithReserves' -Type 'REG_DWORD' -Value '0'
-    Set-GwtOfflineReg -Path 'HKLM\zSYSTEM\ControlSet001\Control\BitLocker' -Name 'PreventDeviceEncryption' -Type 'REG_DWORD' -Value '1'
-
-    Add-GwtLog 'Impedindo instalação de Teams e novo Outlook...'
-    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Policies\Microsoft\Teams' -Name 'DisableInstallation' -Type 'REG_DWORD' -Value '1'
-    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Orchestrator\UScheduler\OutlookUpdate' -Name 'workCompleted' -Type 'REG_DWORD' -Value '1'
-    Set-GwtOfflineReg -Path 'HKLM\zSOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Orchestrator\UScheduler\DevHomeUpdate' -Name 'workCompleted' -Type 'REG_DWORD' -Value '1'
-
-    # NOTA DE SEGURANÇA: NÃO desativamos os serviços do Windows Update aqui.
-    # Fazer isso deixaria a instalação sem atualizações; preferimos o WU funcional.
-
-    Add-GwtLog 'Descarregando hives offline...'
-    [gc]::Collect()
-    foreach ($h in 'zDEFAULT', 'zNTUSER', 'zSOFTWARE', 'zSYSTEM') {
-        & reg.exe unload "HKLM\$h" 2>&1 | Out-Null
+    else {
+        Add-GwtLog 'Nenhum ajuste de registro marcado — imagem fica com as configurações originais.'
     }
 
     # 3. Apagar tarefas de telemetria/CEIP (não mexemos nas de Windows Update)
-    Add-GwtLog 'Removendo tarefas agendadas de telemetria...'
-    $tasks = "$MountDir\Windows\System32\Tasks\Microsoft\Windows"
-    foreach ($t in @(
-        'Application Experience\Microsoft Compatibility Appraiser',
-        'Application Experience\ProgramDataUpdater',
-        'Customer Experience Improvement Program',
-        'Windows Error Reporting\QueueReporting'
-    )) {
-        $full = Join-Path $tasks $t
-        if (Test-Path $full) { Remove-Item $full -Recurse -Force -ErrorAction SilentlyContinue }
+    if (& $has 'TelemetryTasks') {
+        Add-GwtLog 'Removendo tarefas agendadas de telemetria...'
+        $tasks = "$MountDir\Windows\System32\Tasks\Microsoft\Windows"
+        foreach ($t in @(
+            'Application Experience\Microsoft Compatibility Appraiser',
+            'Application Experience\ProgramDataUpdater',
+            'Customer Experience Improvement Program',
+            'Windows Error Reporting\QueueReporting'
+        )) {
+            $full = Join-Path $tasks $t
+            if (Test-Path $full) { Remove-Item $full -Recurse -Force -ErrorAction SilentlyContinue }
+        }
     }
 
     # 4. ei.cfg para a edição escolhida (evita chave de produto embutida errada)
@@ -2467,7 +2537,18 @@ function Invoke-GwtIsoApplyDebloat {
 }
 
 function Invoke-GwtIsoModifyWorker {
-    param([int]$Index, [string]$EditionName, [bool]$InjectDrivers, [bool]$SkipOobe, [string]$AccountName)
+    param(
+        [int]$Index,
+        [string]$EditionName,
+        [bool]$InjectDrivers,
+        [bool]$SkipOobe,
+        [string]$AccountName,
+        [string[]]$Tweaks = @(),
+        [string[]]$AppsToRemove = @(),
+        [bool]$KeepAllEditions = $false,
+        [string]$DriverFolder = '',
+        [string]$ExtraFolder = ''
+    )
 
     $mountDir = $null
     try {
@@ -2501,6 +2582,7 @@ function Invoke-GwtIsoModifyWorker {
             Remove-Item $localWim -Force
             $localWim = $newWim
             $Index = 1
+            $KeepAllEditions = $false   # a conversão já reduziu a uma edição
         }
 
         $sync.StatusText = 'Montando install.wim...'
@@ -2515,7 +2597,8 @@ function Invoke-GwtIsoModifyWorker {
 
         $sync.StatusText = 'Aplicando modificações...'
         $sync.ProgressValue = [double]45
-        Invoke-GwtIsoApplyDebloat -MountDir $mountDir -IsoContents $isoContents -EditionId $editionId
+        Invoke-GwtIsoApplyDebloat -MountDir $mountDir -IsoContents $isoContents -EditionId $editionId `
+            -Tweaks $Tweaks -AppsToRemove $AppsToRemove
 
         if ($SkipOobe) {
             Add-GwtLog "Gravando autounattend.xml (pula OOBE, conta local '$AccountName')..."
@@ -2533,6 +2616,16 @@ function Invoke-GwtIsoModifyWorker {
             Add-GwtLog 'Drivers injetados no install.wim.' 'Success'
         }
 
+        if ($DriverFolder -and (Test-Path -LiteralPath $DriverFolder)) {
+            $sync.StatusText = 'Injetando drivers da pasta escolhida...'
+            Add-GwtLog "Injetando drivers de: $DriverFolder"
+            & dism /English "/image:$mountDir" /Add-Driver "/Driver:$DriverFolder" /Recurse 2>&1 | ForEach-Object {
+                $l = ([string]$_).Trim()
+                if ($l -match 'error|erro|found|encontrado') { Add-GwtLog "    $l" }
+            }
+            Add-GwtLog 'Drivers da pasta injetados.' 'Success'
+        }
+
         $sync.StatusText = 'Limpando component store (WinSxS)...'
         $sync.ProgressValue = [double]58
         Add-GwtLog 'Limpando component store (/ResetBase)...'
@@ -2543,13 +2636,27 @@ function Invoke-GwtIsoModifyWorker {
         Add-GwtLog 'Desmontando e salvando install.wim...'
         Dismount-WindowsImage -Path $mountDir -Save | Out-Null
 
-        $sync.StatusText = 'Removendo edições não usadas...'
-        $sync.ProgressValue = [double]78
-        Add-GwtLog "Exportando somente a edição '$EditionName'..."
-        $exportWim = Join-Path $isoContents 'sources\install_export.wim'
-        Export-WindowsImage -SourceImagePath $localWim -SourceIndex $Index -DestinationImagePath $exportWim | Out-Null
-        Remove-Item $localWim -Force
-        Rename-Item $exportWim -NewName 'install.wim' -Force
+        if ($KeepAllEditions) {
+            Add-GwtLog "Mantendo todas as edições da imagem (nenhuma removida)." 'Info'
+        }
+        else {
+            $sync.StatusText = 'Removendo edições não usadas...'
+            $sync.ProgressValue = [double]78
+            Add-GwtLog "Exportando somente a edição '$EditionName'..."
+            $exportWim = Join-Path $isoContents 'sources\install_export.wim'
+            Export-WindowsImage -SourceImagePath $localWim -SourceIndex $Index -DestinationImagePath $exportWim | Out-Null
+            Remove-Item $localWim -Force
+            Rename-Item $exportWim -NewName 'install.wim' -Force
+        }
+
+        if ($ExtraFolder -and (Test-Path -LiteralPath $ExtraFolder)) {
+            $sync.StatusText = 'Copiando arquivos extras para a ISO...'
+            $destExtra = Join-Path $isoContents 'Genius'
+            Add-GwtLog "Copiando arquivos extras de '$ExtraFolder' para a pasta Genius\ da ISO..."
+            New-Item -ItemType Directory -Path $destExtra -Force | Out-Null
+            & robocopy.exe $ExtraFolder $destExtra /E /NFL /NDL /NJH /NJS /NP | Out-Null
+            Add-GwtLog 'Arquivos extras copiados (ficarão na raiz da mídia, em \Genius).' 'Success'
+        }
 
         $sync.StatusText = 'Desmontando ISO de origem...'
         Add-GwtLog 'Desmontando a ISO de origem...'
@@ -3561,8 +3668,16 @@ function Invoke-GwtRunspace {
                                         <Border Background="{StaticResource SoftBrush}" CornerRadius="10" Padding="14" Margin="0,0,0,10">
                                             <StackPanel>
                                                 <TextBlock Text="3 · Modificar a imagem" FontWeight="Bold" Margin="0,0,0,8"/>
-                                                <CheckBox Name="IsoInjectDriversCheck" Content="Injetar os drivers desta máquina na ISO" Margin="0,0,0,6"
-                                                          ToolTip="Exporta os drivers do sistema atual e injeta no install.wim (útil para o mesmo modelo de máquina)."/>
+                                                <TextBlock Text="Perfil de modificação:" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,6"/>
+                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                                    <RadioButton Name="IsoProfileConservador" GroupName="IsoProfile" Content="Conservador" Foreground="{StaticResource TextBrush}" Margin="0,0,14,0"
+                                                                 ToolTip="Só o essencial: bypass de requisitos e conta local. Não remove apps nem mexe em telemetria."/>
+                                                    <RadioButton Name="IsoProfileRecomendado" GroupName="IsoProfile" Content="Recomendado" Foreground="{StaticResource TextBrush}" IsChecked="True" Margin="0,0,14,0"
+                                                                 ToolTip="Equilíbrio: bypass, conta local, telemetria, sugestões, Copilot e apps de bloatware mais comuns."/>
+                                                    <RadioButton Name="IsoProfileAgressivo" GroupName="IsoProfile" Content="Agressivo" Foreground="{StaticResource TextBrush}"
+                                                                 ToolTip="Tudo: inclui bloquear Teams/Outlook e desativar o Armazenamento Reservado. Remove todos os apps sugeridos."/>
+                                                </StackPanel>
+
                                                 <CheckBox Name="IsoSkipOobeCheck" Content="Pular OOBE e criar conta local automática" Margin="0,0,0,6" IsChecked="True"
                                                           ToolTip="Gera um autounattend.xml que pula toda a configuração inicial e cria uma conta local Administrador (sem senha — defina depois)."/>
                                                 <Grid Margin="0,0,0,10">
@@ -3573,6 +3688,35 @@ function Invoke-GwtRunspace {
                                                     <TextBlock Text="Nome da conta:" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                                     <TextBox Grid.Column="1" Name="IsoAccountBox" Text="Usuario" VerticalContentAlignment="Center"/>
                                                 </Grid>
+
+                                                <Button Name="IsoAdvancedToggle" Style="{StaticResource GhostButton}" Content="⚙  Opções avançadas ▾" HorizontalAlignment="Left" Margin="0,0,0,8"/>
+                                                <StackPanel Name="IsoAdvancedPanel" Visibility="Collapsed" Margin="0,0,0,10">
+                                                    <TextBlock Text="Ajustes aplicados na imagem" FontWeight="SemiBold" Foreground="{StaticResource GoldBrush}" Margin="0,0,0,4"/>
+                                                    <StackPanel Name="IsoTweakList" Margin="0,0,0,10"/>
+
+                                                    <TextBlock Text="Outras opções" FontWeight="SemiBold" Foreground="{StaticResource GoldBrush}" Margin="0,0,0,4"/>
+                                                    <CheckBox Name="IsoKeepEditionsCheck" Content="Manter todas as edições na ISO final" Margin="0,0,0,6"
+                                                              ToolTip="Por padrão a ISO fica só com a edição escolhida (arquivo bem menor)."/>
+                                                    <CheckBox Name="IsoInjectDriversCheck" Content="Injetar os drivers desta máquina na ISO" Margin="0,0,0,6"
+                                                              ToolTip="Exporta os drivers do sistema atual e injeta no install.wim (útil para o mesmo modelo de máquina)."/>
+                                                    <Grid Margin="0,0,0,6">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBox Name="IsoDriverFolderBox" IsReadOnly="True" VerticalContentAlignment="Center" Text="Pasta de drivers extra (opcional)..." Margin="0,0,8,0"/>
+                                                        <Button Grid.Column="1" Name="IsoDriverFolderButton" Style="{StaticResource GhostButton}" Content="Escolher..." Margin="0"/>
+                                                    </Grid>
+                                                    <Grid Margin="0,0,0,6">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBox Name="IsoExtraFolderBox" IsReadOnly="True" VerticalContentAlignment="Center" Text="Pasta para copiar na ISO em \Genius (opcional)..." Margin="0,0,8,0"/>
+                                                        <Button Grid.Column="1" Name="IsoExtraFolderButton" Style="{StaticResource GhostButton}" Content="Escolher..." Margin="0"/>
+                                                    </Grid>
+                                                </StackPanel>
+
                                                 <Button Name="IsoModifyButton" Style="{StaticResource GoldButton}" Content="🛠️  Modificar install.wim" HorizontalAlignment="Left" IsEnabled="False"/>
                                             </StackPanel>
                                         </Border>
@@ -3602,13 +3746,39 @@ function Invoke-GwtRunspace {
                             </Border>
 
                             <Border Grid.Column="2" Style="{StaticResource Card}">
-                                <StackPanel>
-                                    <TextBlock Text="Como funciona" FontSize="18" FontWeight="Bold" Margin="0,0,0,10"/>
-                                    <TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" LineHeight="21"><Run Text="• Use uma ISO oficial do Windows 11 (baixe pelo site da Microsoft)."/><LineBreak/><Run Text="• A imagem final remove apps pré-instalados (Teams, Copilot, Office Hub, Xbox, etc.), telemetria e sugestões, e permite conta local no OOBE."/><LineBreak/><Run Text="• O bypass de requisitos permite instalar em máquinas sem TPM 2.0/Secure Boot."/><LineBreak/><Run Text="• O processo leva vários minutos e usa bastante espaço em disco temporário (~10 GB) e o oscdimg (instalado via winget se faltar)."/></TextBlock>
-                                    <Border Background="#2D2113" BorderBrush="{StaticResource GoldBrush}" BorderThickness="1" CornerRadius="10" Padding="14" Margin="0,16,0,0">
-                                        <TextBlock Foreground="#FFE7B0" TextWrapping="Wrap" LineHeight="20"><Run Text="Diferente de outras ferramentas, o Windows Update continua funcional na ISO gerada — não desativamos os serviços de atualização. O acompanhamento aparece no log abaixo."/></TextBlock>
-                                    </Border>
-                                </StackPanel>
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="*"/>
+                                    </Grid.RowDefinitions>
+
+                                    <StackPanel Grid.Row="0" Name="IsoHelpPanel">
+                                        <TextBlock Text="Como funciona" FontSize="18" FontWeight="Bold" Margin="0,0,0,10"/>
+                                        <TextBlock Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" LineHeight="21"><Run Text="• Prefira uma ISO oficial do Windows 11 (site da Microsoft). ISOs já modificadas por terceiros podem reagir mal a novas alterações."/><LineBreak/><Run Text="• Escolha um perfil e, se quiser controle fino, abra as Opções avançadas."/><LineBreak/><Run Text="• Depois de montar a ISO, a lista de apps abaixo mostra o que existe naquela imagem — marque o que remover."/><LineBreak/><Run Text="• O processo leva vários minutos e usa ~10 GB de disco temporário."/></TextBlock>
+                                        <Border Background="#2D2113" BorderBrush="{StaticResource GoldBrush}" BorderThickness="1" CornerRadius="10" Padding="14" Margin="0,14,0,10">
+                                            <TextBlock Foreground="#FFE7B0" TextWrapping="Wrap" LineHeight="20"><Run Text="O Windows Update continua funcional na ISO gerada — não desativamos os serviços de atualização."/></TextBlock>
+                                        </Border>
+                                    </StackPanel>
+
+                                    <Grid Grid.Row="1" Name="IsoAppsPanel" Visibility="Collapsed">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                        </Grid.RowDefinitions>
+                                        <StackPanel Grid.Row="0" Margin="0,0,0,6">
+                                            <TextBlock Name="IsoAppsTitle" Text="Apps pré-instalados nesta ISO" FontSize="16" FontWeight="Bold"/>
+                                            <TextBlock Text="Marque o que deve ser REMOVIDO da imagem." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,0,6"/>
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button Name="IsoAppsAllButton" Style="{StaticResource GhostButton}" Content="Marcar tudo" Margin="0,0,6,0"/>
+                                                <Button Name="IsoAppsNoneButton" Style="{StaticResource GhostButton}" Content="Limpar" Margin="0,0,6,0"/>
+                                                <Button Name="IsoAppsSuggestButton" Style="{StaticResource GhostButton}" Content="⭐ Sugeridos" Margin="0"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                                            <StackPanel Name="IsoAppsList"/>
+                                        </ScrollViewer>
+                                    </Grid>
+                                </Grid>
                             </Border>
                         </Grid>
                     </TabItem>
@@ -3883,6 +4053,64 @@ foreach ($app in $AppxDebloat) {
     $check.ToolTip = $app.Id
     $check.IsChecked = [bool]$app.Default
     [void]$sync.Controls['AppxList'].Children.Add($check)
+}
+
+# --- Ajustes da ISO (opções avançadas) ---
+foreach ($tw in $IsoTweaks) {
+    $check = New-Object System.Windows.Controls.CheckBox
+    $check.Content = $tw.Name
+    $check.Tag = $tw.Key
+    $check.FontSize = 12
+    [void]$sync.Controls['IsoTweakList'].Children.Add($check)
+}
+
+# Marca os ajustes conforme o perfil escolhido (Conservador/Recomendado/Agressivo)
+function Set-GwtIsoProfile {
+    param([string]$Perfil)
+    foreach ($child in $sync.Controls['IsoTweakList'].Children) {
+        if ($child -isnot [System.Windows.Controls.CheckBox]) { continue }
+        $def = $IsoTweaks | Where-Object { $_.Key -eq [string]$child.Tag }
+        $child.IsChecked = ($def -and $def.Perfis -contains $Perfil)
+    }
+    # Apps: Conservador não remove nada; os demais usam a lista sugerida
+    if ($sync.Controls['IsoAppsList'].Children.Count -gt 0) {
+        if ($Perfil -eq 'Conservador') { Set-GwtIsoAppsSelection -Mode 'None' }
+        else { Set-GwtIsoAppsSelection -Mode 'Suggested' }
+    }
+}
+
+function Get-GwtIsoSelectedTweaks {
+    $keys = @()
+    foreach ($child in $sync.Controls['IsoTweakList'].Children) {
+        if ($child -is [System.Windows.Controls.CheckBox] -and $child.IsChecked) { $keys += [string]$child.Tag }
+    }
+    return $keys
+}
+
+# Apps que normalmente são removidos (usado pelo botão "Sugeridos" e pelos perfis)
+$IsoSuggestedRemovals = @(
+    'Clipchamp.Clipchamp', 'Microsoft.BingNews', 'Microsoft.BingSearch', 'Microsoft.BingWeather',
+    'Microsoft.GetHelp', 'Microsoft.MicrosoftOfficeHub', 'Microsoft.MicrosoftSolitaireCollection',
+    'Microsoft.MicrosoftStickyNotes', 'Microsoft.OutlookForWindows', 'Microsoft.PowerAutomateDesktop',
+    'Microsoft.StartExperiencesApp', 'Microsoft.Todos', 'Microsoft.Windows.DevHome',
+    'Microsoft.WindowsFeedbackHub', 'Microsoft.WindowsSoundRecorder', 'Microsoft.ZuneMusic',
+    'MicrosoftCorporationII.QuickAssist', 'MSTeams', 'Microsoft.Copilot', 'Microsoft.GamingApp',
+    'Microsoft.XboxGamingOverlay', 'Microsoft.YourPhone', 'MicrosoftWindows.CrossDevice'
+)
+
+function Set-GwtIsoAppsSelection {
+    param([ValidateSet('All', 'None', 'Suggested')][string]$Mode)
+    foreach ($child in $sync.Controls['IsoAppsList'].Children) {
+        if ($child -isnot [System.Windows.Controls.CheckBox]) { continue }
+        switch ($Mode) {
+            'All'  { $child.IsChecked = $true }
+            'None' { $child.IsChecked = $false }
+            'Suggested' {
+                $pkgName = [string]$child.Tag
+                $child.IsChecked = [bool]($IsoSuggestedRemovals | Where-Object { $pkgName -like "*$_*" })
+            }
+        }
+    }
 }
 
 # --- Recursos do Windows ---
@@ -4569,13 +4797,76 @@ $sync.Controls['IsoModifyButton'].Add_Click({
     $inject = [bool]$sync.Controls['IsoInjectDriversCheck'].IsChecked
     $skipOobe = [bool]$sync.Controls['IsoSkipOobeCheck'].IsChecked
     $account = [string]$sync.Controls['IsoAccountBox'].Text
-    $msg = "Modificar a install.wim da edição:`n$name`n`nIsso copia a ISO (~5-6 GB), remove bloatware, aplica os ajustes e recria a imagem. Pode levar de 15 a 40 minutos e usa bastante disco temporário.`n`nContinuar?"
+    $keepAll = [bool]$sync.Controls['IsoKeepEditionsCheck'].IsChecked
+    $tweaks = @(Get-GwtIsoSelectedTweaks)
+
+    $apps = @()
+    foreach ($child in $sync.Controls['IsoAppsList'].Children) {
+        if ($child -is [System.Windows.Controls.CheckBox] -and $child.IsChecked) { $apps += [string]$child.Tag }
+    }
+
+    $drvFolder = ''
+    if ($sync.Controls['IsoDriverFolderBox'].Text -notlike 'Pasta de drivers*') { $drvFolder = [string]$sync.Controls['IsoDriverFolderBox'].Text }
+    $extraFolder = ''
+    if ($sync.Controls['IsoExtraFolderBox'].Text -notlike 'Pasta para copiar*') { $extraFolder = [string]$sync.Controls['IsoExtraFolderBox'].Text }
+
+    $resumo = @(
+        "Edição: $name",
+        "Ajustes marcados: $($tweaks.Count) de $($IsoTweaks.Count)",
+        "Apps a remover: $($apps.Count)",
+        "Edições mantidas: $(if ($keepAll) { 'todas' } else { 'somente a escolhida' })",
+        "Pular OOBE: $(if ($skipOobe) { "sim (conta '$account')" } else { 'não' })"
+    ) -join "`n"
+    $msg = "$resumo`n`nO processo copia a ISO (~5-6 GB), aplica as mudanças e recria a imagem. Pode levar de 15 a 40 minutos.`n`nContinuar?"
     if ([System.Windows.MessageBox]::Show($Window, $msg, 'Confirmar modificação', 'YesNo', 'Warning') -ne 'Yes') { return }
+
     Invoke-GwtRunspace -ScriptBlock {
         param($arg)
-        Invoke-GwtIsoModifyWorker -Index $arg.Index -EditionName $arg.Name -InjectDrivers $arg.Inject -SkipOobe $arg.SkipOobe -AccountName $arg.Account
-    } -Argument @{ Index = $index; Name = $name; Inject = $inject; SkipOobe = $skipOobe; Account = $account }
+        Invoke-GwtIsoModifyWorker -Index $arg.Index -EditionName $arg.Name -InjectDrivers $arg.Inject `
+            -SkipOobe $arg.SkipOobe -AccountName $arg.Account -Tweaks $arg.Tweaks -AppsToRemove $arg.Apps `
+            -KeepAllEditions $arg.KeepAll -DriverFolder $arg.DrvFolder -ExtraFolder $arg.ExtraFolder
+    } -Argument @{ Index = $index; Name = $name; Inject = $inject; SkipOobe = $skipOobe; Account = $account
+                   Tweaks = $tweaks; Apps = $apps; KeepAll = $keepAll; DrvFolder = $drvFolder; ExtraFolder = $extraFolder }
 })
+
+# Opções avançadas: mostrar/ocultar
+$sync.Controls['IsoAdvancedToggle'].Add_Click({
+    $panel = $sync.Controls['IsoAdvancedPanel']
+    if ($panel.Visibility -eq 'Visible') {
+        $panel.Visibility = 'Collapsed'
+        $sync.Controls['IsoAdvancedToggle'].Content = '⚙  Opções avançadas ▾'
+    }
+    else {
+        $panel.Visibility = 'Visible'
+        $sync.Controls['IsoAdvancedToggle'].Content = '⚙  Opções avançadas ▴'
+    }
+})
+
+# Perfis
+$sync.Controls['IsoProfileConservador'].Add_Checked({ Set-GwtIsoProfile -Perfil 'Conservador' })
+$sync.Controls['IsoProfileRecomendado'].Add_Checked({ Set-GwtIsoProfile -Perfil 'Recomendado' })
+$sync.Controls['IsoProfileAgressivo'].Add_Checked({ Set-GwtIsoProfile -Perfil 'Agressivo' })
+
+# Pastas opcionais
+function Select-GwtFolderInto {
+    param([string]$BoxName, [string]$Titulo)
+    Add-Type -AssemblyName System.Windows.Forms
+    $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dlg.Description = $Titulo
+    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $sync.Controls[$BoxName].Text = $dlg.SelectedPath
+    }
+}
+$sync.Controls['IsoDriverFolderButton'].Add_Click({ Select-GwtFolderInto -BoxName 'IsoDriverFolderBox' -Titulo 'Pasta com drivers (.inf) para injetar na imagem' })
+$sync.Controls['IsoExtraFolderButton'].Add_Click({ Select-GwtFolderInto -BoxName 'IsoExtraFolderBox' -Titulo 'Pasta a copiar para dentro da ISO (irá para \Genius)' })
+
+# Seleção de apps da ISO
+$sync.Controls['IsoAppsAllButton'].Add_Click({ Set-GwtIsoAppsSelection -Mode 'All' })
+$sync.Controls['IsoAppsNoneButton'].Add_Click({ Set-GwtIsoAppsSelection -Mode 'None' })
+$sync.Controls['IsoAppsSuggestButton'].Add_Click({ Set-GwtIsoAppsSelection -Mode 'Suggested' })
+
+# Estado inicial dos ajustes da ISO conforme o perfil padrão (Recomendado)
+Set-GwtIsoProfile -Perfil 'Recomendado'
 
 $sync.Controls['IsoUsbRefreshButton'].Add_Click({
     $combo = $sync.Controls['IsoUsbCombo']
@@ -4800,6 +5091,29 @@ function Invoke-PendingUiAction {
             if ($combo.Items.Count -gt 0) { $combo.SelectedIndex = [Math]::Max($proIdx, 0) }
             $combo.IsEnabled = $true
             $sync.Controls['IsoModifyButton'].IsEnabled = $true
+
+            # Preenche a lista com os apps REAIS encontrados na imagem
+            $appsPanel = $sync.Controls['IsoAppsList']
+            $appsPanel.Children.Clear()
+            foreach ($app in $sync.IsoAppxList) {
+                $c = New-Object System.Windows.Controls.CheckBox
+                $c.Content = $app.Name
+                $c.Tag = $app.PackageName
+                $c.ToolTip = $app.PackageName
+                $c.FontSize = 12
+                $c.Margin = '0,2,0,2'
+                [void]$appsPanel.Children.Add($c)
+            }
+            if ($appsPanel.Children.Count -gt 0) {
+                $sync.Controls['IsoAppsTitle'].Text = "Apps pré-instalados nesta ISO ($($appsPanel.Children.Count))"
+                $sync.Controls['IsoAppsPanel'].Visibility = 'Visible'
+                # Aplica a seleção conforme o perfil ativo
+                $perfilAtivo = if ($sync.Controls['IsoProfileConservador'].IsChecked) { 'Conservador' }
+                               elseif ($sync.Controls['IsoProfileAgressivo'].IsChecked) { 'Agressivo' }
+                               else { 'Recomendado' }
+                if ($perfilAtivo -eq 'Conservador') { Set-GwtIsoAppsSelection -Mode 'None' }
+                else { Set-GwtIsoAppsSelection -Mode 'Suggested' }
+            }
         }
         'IsoModified' {
             $sync.Controls['IsoExportButton'].IsEnabled = $true
@@ -4850,6 +5164,8 @@ function Invoke-PendingUiAction {
             $sync.Controls['IsoModifyButton'].IsEnabled = $false
             $sync.Controls['IsoExportButton'].IsEnabled = $false
             $sync.Controls['IsoUsbWriteButton'].IsEnabled = $false
+            $sync.Controls['IsoAppsList'].Children.Clear()
+            $sync.Controls['IsoAppsPanel'].Visibility = 'Collapsed'
         }
     }
 }
@@ -4971,6 +5287,9 @@ if ($SmokeTest) {
                   'PreferencesList', 'PrivacyList', 'AppxList', 'FeatureList', 'DnsCombo',
                   'LegacyPanelList', 'IsoPathBox', 'IsoEditionCombo', 'IsoInjectDriversCheck',
                   'IsoSkipOobeCheck', 'IsoAccountBox', 'IsoUsbCombo', 'IsoUsbRefreshButton',
+                  'IsoTweakList', 'IsoAppsList', 'IsoAppsPanel', 'IsoAdvancedPanel', 'IsoAdvancedToggle',
+                  'IsoProfileConservador', 'IsoProfileRecomendado', 'IsoProfileAgressivo',
+                  'IsoKeepEditionsCheck', 'IsoDriverFolderBox', 'IsoExtraFolderBox',
                   'KitOpenButton', 'MonitorIntervalBox', 'MonitorPresetCheck',
                   'LogBox', 'Progress', 'StatusText') + $ActionButtons
     foreach ($name in $required) {
@@ -4986,6 +5305,17 @@ if ($SmokeTest) {
     # O autounattend.xml precisa ser XML válido.
     try { [xml](Get-GwtAutounattendXml -AccountName 'Teste') | Out-Null }
     catch { $issues += 'autounattend-xml-invalido' }
+
+    # Os perfis da ISO precisam marcar conjuntos diferentes de ajustes.
+    Set-GwtIsoProfile -Perfil 'Conservador'
+    $consv = @(Get-GwtIsoSelectedTweaks).Count
+    Set-GwtIsoProfile -Perfil 'Agressivo'
+    $agres = @(Get-GwtIsoSelectedTweaks).Count
+    Set-GwtIsoProfile -Perfil 'Recomendado'
+    $recom = @(Get-GwtIsoSelectedTweaks).Count
+    if (-not ($consv -lt $recom -and $recom -lt $agres)) {
+        $issues += "perfis-iso:$consv/$recom/$agres"
+    }
 
     # A grade de programas em colunas precisa expor todos os pacotes do catálogo.
     $renderedPkgs = @(Get-GwtPackageCheckBoxes).Count
