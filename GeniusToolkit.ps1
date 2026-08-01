@@ -97,6 +97,8 @@ $sync.IsoUsbDisks    = @()
 $sync.KitUpdates     = @()      # apps do kit com atualização disponível
 $sync.KitDir         = $null
 $sync.IsoAppxList    = @()      # AppX provisionados encontrados na ISO montada
+$sync.CreateRestorePoint = $true   # criar ponto de restauração antes de alterar o sistema
+$sync.CancelRequested = $false     # pedido de cancelamento da operação em andamento
 
 New-Item -ItemType Directory -Path $sync.BackupRoot, $sync.LogRoot, $sync.ReportRoot -Force | Out-Null
 
@@ -766,6 +768,69 @@ function Set-GwtKnownFolderPath {
     }
 }
 
+# Cria um ponto de restauração do sistema antes de mudanças relevantes.
+# Retorna $true se criou (ou se o usuário desativou a opção), $false em falha real.
+function New-GwtRestorePoint {
+    param([string]$Reason = 'Genius Windows Toolkit')
+
+    if (-not $sync.CreateRestorePoint) {
+        Add-GwtLog 'Ponto de restauração desativado nas opções — seguindo sem criar.' 'Warn'
+        return $true
+    }
+    if (-not (Test-GwtAdmin)) {
+        Add-GwtLog 'Sem Administrador: não é possível criar ponto de restauração.' 'Warn'
+        return $true
+    }
+
+    try {
+        $sync.StatusText = 'Criando ponto de restauração...'
+        Add-GwtLog "Criando ponto de restauração: $Reason"
+
+        $sysDrive = $env:SystemDrive
+        # Garante que a Restauração do Sistema esteja ligada no disco do Windows
+        try { Enable-ComputerRestore -Drive "$sysDrive\" -ErrorAction Stop }
+        catch { Add-GwtLog "Aviso ao habilitar a Restauração do Sistema: $($_.Exception.Message)" 'Warn' }
+
+        # Por padrão o Windows só cria 1 ponto a cada 24h; zeramos o intervalo
+        $srPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SystemRestore'
+        $freqAnterior = $null
+        try {
+            $freqAnterior = (Get-ItemProperty -Path $srPath -Name 'SystemRestorePointCreationFrequency' -ErrorAction SilentlyContinue).SystemRestorePointCreationFrequency
+            New-ItemProperty -Path $srPath -Name 'SystemRestorePointCreationFrequency' -PropertyType DWord -Value 0 -Force | Out-Null
+        }
+        catch { }
+
+        Checkpoint-Computer -Description $Reason -RestorePointType 'MODIFY_SETTINGS' -ErrorAction Stop
+
+        # Devolve a frequência original (ou remove a chave que criamos)
+        try {
+            if ($null -ne $freqAnterior) {
+                New-ItemProperty -Path $srPath -Name 'SystemRestorePointCreationFrequency' -PropertyType DWord -Value $freqAnterior -Force | Out-Null
+            }
+            else {
+                Remove-ItemProperty -Path $srPath -Name 'SystemRestorePointCreationFrequency' -ErrorAction SilentlyContinue
+            }
+        }
+        catch { }
+
+        Add-GwtLog 'Ponto de restauração criado com sucesso.' 'Success'
+        return $true
+    }
+    catch {
+        Add-GwtLog "Não foi possível criar o ponto de restauração: $($_.Exception.Message)" 'Error'
+        return $false
+    }
+}
+
+# Cancelamento cooperativo: os loops chamam isto entre um item e outro.
+function Test-GwtCancel {
+    if ($sync.CancelRequested) {
+        Add-GwtLog 'Operação cancelada pelo usuário.' 'Warn'
+        return $true
+    }
+    return $false
+}
+
 function Export-GwtRegistryKey {
     param([string]$Key, [string]$Destination)
 
@@ -1020,6 +1085,7 @@ function Invoke-GwtMigrationWorker {
         $ok = 0
         $failed = 0
         foreach ($item in $pending) {
+            if (Test-GwtCancel) { break }
             $sync.StatusText = "Copiando $($item.PlainName)..."
             Add-GwtLog "▶ $($item.PlainName): $($item.CurrentPath) → $($item.TargetPath) ($($item.SizeText))"
 
@@ -1178,11 +1244,14 @@ function Invoke-GwtNetworkWorker {
             'HKLM\SYSTEM\CurrentControlSet\Services\FDResPub',
             'HKLM\SYSTEM\CurrentControlSet\Services\NetBT\Parameters'
         )
+        New-GwtRestorePoint -Reason 'Antes do reparo de rede (Genius Toolkit)' | Out-Null
+
         $backup = Backup-GwtRegistrySet -Name 'network' -Keys $backupKeys
         Add-GwtLog "Backup de registro de rede criado em: $backup" 'Success'
 
         $failed = 0
         foreach ($key in $Keys) {
+            if (Test-GwtCancel) { break }
             try {
                 Invoke-GwtNetworkAction -Key $key
             }
@@ -1219,6 +1288,7 @@ function Invoke-GwtWingetWorker {
         $index = 0
 
         foreach ($pkg in $Selected) {
+            if (Test-GwtCancel) { break }
             $index++
             $sync.StatusText = "Instalando $($pkg.Name) ($index de $($Selected.Count))..."
             Add-GwtLog "▶ [$index/$($Selected.Count)] $($pkg.Name) ($($pkg.Id))"
@@ -1308,6 +1378,7 @@ function Invoke-GwtWingetUninstallWorker {
         $index = 0
 
         foreach ($pkg in $Selected) {
+            if (Test-GwtCancel) { break }
             $index++
             $pkgId = [string]$pkg.Id
             if ($pkgId -like 'msstore:*') { $pkgId = $pkgId.Substring(8) }
@@ -1385,6 +1456,7 @@ function Invoke-GwtKitDownloadWorker {
         $index = 0
 
         foreach ($pkg in $Selected) {
+            if (Test-GwtCancel) { break }
             $index++
             $pkgId = [string]$pkg.Id
             if ($pkgId -like 'msstore:*') {
@@ -1470,6 +1542,7 @@ function Invoke-GwtKitInstallWorker {
         $index = 0
 
         foreach ($app in $apps) {
+            if (Test-GwtCancel) { break }
             $index++
             $appDir = Join-Path $KitDir ([string]$app.Folder)
             $sync.StatusText = "Instalando $($app.Name) ($index de $($apps.Count))..."
@@ -1560,6 +1633,7 @@ function Invoke-GwtKitCheckWorker {
         $updates = New-Object System.Collections.Generic.List[object]
         $index = 0
         foreach ($app in $apps) {
+            if (Test-GwtCancel) { break }
             $index++
             $sync.StatusText = "Verificando $($app.Name) ($index de $($apps.Count))..."
             $current = [string]$app.Version
@@ -1610,6 +1684,7 @@ function Invoke-GwtKitUpdateWorker {
 
         $ok = 0; $fail = 0; $index = 0
         foreach ($upd in $Updates) {
+            if (Test-GwtCancel) { break }
             $index++
             $id = [string]$upd.Id
             $entry = $byId[$id]
@@ -1704,6 +1779,8 @@ function Invoke-GwtUpdatePolicyWorker {
         $sync.Busy = $true
         $sync.StatusText = "Aplicando política de Windows Update ($Mode)..."
         Add-GwtLog "================ WINDOWS UPDATE: $Mode ================"
+
+        New-GwtRestorePoint -Reason "Antes da política de Windows Update: $Mode (Genius Toolkit)" | Out-Null
 
         $backup = Backup-GwtRegistrySet -Name 'winupdate' -Keys @(
             'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate',
@@ -1933,12 +2010,15 @@ function Invoke-GwtApplyKeysWorker {
             'HKLM\SOFTWARE\Policies\Microsoft\Edge',
             'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Power'
         )
+        New-GwtRestorePoint -Reason "Antes de: $Title (Genius Toolkit)" | Out-Null
+
         $backup = Backup-GwtRegistrySet -Name $BackupName -Keys $backupKeys
         Add-GwtLog "Backup criado em: $backup" 'Success'
 
         $needExplorer = $false
         $failed = 0
         foreach ($key in $Keys) {
+            if (Test-GwtCancel) { break }
             try {
                 Invoke-GwtOpData -Key $key
                 if ($sync.OpData[$key] -and $sync.OpData[$key].ContainsKey('Explorer')) { $needExplorer = $true }
@@ -1972,9 +2052,11 @@ function Invoke-GwtDebloatWorker {
         $sync.ProgressMax = [double]$Packages.Count
         $sync.ProgressValue = [double]0
         Add-GwtLog "================ REMOÇÃO DE APPS DA STORE ($($Packages.Count)) ================"
+        New-GwtRestorePoint -Reason 'Antes de remover apps da Store (Genius Toolkit)' | Out-Null
 
         $ok = 0; $index = 0
         foreach ($pkg in $Packages) {
+            if (Test-GwtCancel) { break }
             $index++
             $sync.StatusText = "Removendo $($pkg.Name)..."
             try {
@@ -2009,8 +2091,10 @@ function Invoke-GwtFeatureWorker {
     try {
         $sync.Busy = $true
         Add-GwtLog "================ RECURSOS DO WINDOWS ================"
+        New-GwtRestorePoint -Reason 'Antes de ativar recursos do Windows (Genius Toolkit)' | Out-Null
         $failed = 0
         foreach ($feat in $Features) {
+            if (Test-GwtCancel) { break }
             $sync.StatusText = "Ativando $($feat.Name)..."
             Add-GwtLog "▶ $($feat.Name)"
             try {
@@ -3296,7 +3380,17 @@ function Invoke-GwtRunspace {
                         <Button Name="RestoreRegButton" Style="{StaticResource GhostButton}" Content="♻️  Restaurar backup .reg" Margin="0,0,0,8"/>
                     </StackPanel>
 
-                    <TextBlock Grid.Row="3" Text="Ações sensíveis sempre pedem confirmação e criam backup antes de alterar o registro." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" LineHeight="18" FontSize="12"/>
+                    <StackPanel Grid.Row="3">
+                        <Border Background="{StaticResource SoftBrush}" CornerRadius="10" Padding="10" Margin="0,0,0,8">
+                            <StackPanel>
+                                <CheckBox Name="RestorePointCheck" IsChecked="True" FontSize="12"
+                                          Content="Criar ponto de restauração"
+                                          ToolTip="Antes de aplicar ajustes, privacidade, rede, recursos ou políticas de Update, cria um ponto de restauração do Windows. Recomendado."/>
+                                <TextBlock Text="Rede de segurança antes de alterar o sistema." Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Text="Ações sensíveis sempre pedem confirmação e criam backup antes de alterar o registro." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" LineHeight="18" FontSize="12"/>
+                    </StackPanel>
                 </Grid>
             </Border>
 
@@ -3842,7 +3936,11 @@ function Invoke-GwtRunspace {
                         <ColumnDefinition Width="280"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Name="StatusText" Text="Pronto." Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
-                    <TextBlock Name="ProgressText" Grid.Column="1" Text="" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                        <Button Name="CancelButton" Style="{StaticResource GhostButton}" Content="✖ Cancelar" Visibility="Collapsed" Margin="0,0,10,0"
+                                ToolTip="Interrompe a operação após concluir o item atual (não interrompe uma cópia ou DISM já em andamento)."/>
+                        <TextBlock Name="ProgressText" Text="" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                    </StackPanel>
                     <ProgressBar Name="Progress" Grid.Column="2" Minimum="0" Maximum="100" Value="0" VerticalAlignment="Center"/>
                 </Grid>
             </Grid>
@@ -5023,6 +5121,20 @@ $sync.Controls['ElevateButton'].Add_Click({
     }
 })
 
+$sync.Controls['RestorePointCheck'].Add_Checked({ $sync.CreateRestorePoint = $true })
+$sync.Controls['RestorePointCheck'].Add_Unchecked({
+    $sync.CreateRestorePoint = $false
+    Add-GwtLog 'Ponto de restauração DESATIVADO — as próximas alterações não terão esse ponto de retorno.' 'Warn'
+})
+
+$sync.Controls['CancelButton'].Add_Click({
+    if (-not $sync.Busy) { return }
+    $sync.CancelRequested = $true
+    $sync.Controls['CancelButton'].IsEnabled = $false
+    $sync.Controls['CancelButton'].Content = '✖ Cancelando...'
+    Add-GwtLog 'Cancelamento solicitado — a operação para após concluir o item atual.' 'Warn'
+})
+
 $sync.Controls['OpenBackupsButton'].Add_Click({ Start-Process explorer.exe $sync.BackupRoot })
 $sync.Controls['OpenLogsButton'].Add_Click({ Start-Process explorer.exe $sync.LogRoot })
 $sync.Controls['OpenReportsButton'].Add_Click({ Start-Process explorer.exe $sync.ReportRoot })
@@ -5216,6 +5328,20 @@ $UiTimer.Add_Tick({
         $sync.Controls[$name].IsEnabled = -not [bool]$sync.Busy
     }
 
+    # 3b. Botão Cancelar só aparece durante uma operação
+    $cancelBtn = $sync.Controls['CancelButton']
+    if ($sync.Busy) {
+        if ($cancelBtn.Visibility -ne 'Visible') {
+            $cancelBtn.Visibility = 'Visible'
+            $cancelBtn.IsEnabled = $true
+            $cancelBtn.Content = '✖ Cancelar'
+        }
+    }
+    elseif ($cancelBtn.Visibility -eq 'Visible') {
+        $cancelBtn.Visibility = 'Collapsed'
+        $sync.CancelRequested = $false   # zera para a próxima operação
+    }
+
     # 4. Processa uma ação de UI pendente por tick (evita diálogos empilhados)
     if (-not $script:DialogOpen) {
         $uiAction = $null
@@ -5291,6 +5417,7 @@ if ($SmokeTest) {
                   'IsoProfileConservador', 'IsoProfileRecomendado', 'IsoProfileAgressivo',
                   'IsoKeepEditionsCheck', 'IsoDriverFolderBox', 'IsoExtraFolderBox',
                   'KitOpenButton', 'MonitorIntervalBox', 'MonitorPresetCheck',
+                  'RestorePointCheck', 'CancelButton',
                   'LogBox', 'Progress', 'StatusText') + $ActionButtons
     foreach ($name in $required) {
         if (-not $sync.Controls.ContainsKey($name) -or $null -eq $sync.Controls[$name]) { $issues += $name }
