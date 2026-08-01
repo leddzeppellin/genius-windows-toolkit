@@ -963,7 +963,9 @@ function Invoke-GwtAnalyzeWorker {
 
         $free = ([System.IO.DriveInfo]::new("$Drive\")).AvailableFreeSpace
 
-        $sync.Plan = @($plan)
+        # .ToArray() em vez de @(...): no PowerShell 5.1, @() sobre List[object]
+        # lança "Os tipos de argumento não correspondem".
+        $sync.Plan = $plan.ToArray()
         $sync.PlanTotalBytes = $totalBytes
         $sync.PlanTotalFiles = $totalFiles
         $sync.PlanFreeBytes = $free
@@ -1561,7 +1563,7 @@ function Invoke-GwtKitCheckWorker {
         }
 
         $sync.KitDir = $KitDir
-        $sync.KitUpdates = @($updates)
+        $sync.KitUpdates = $updates.ToArray()   # veja a nota sobre @() e List[object]
         Add-GwtLog "Verificação concluída: $($updates.Count) com atualização de $($apps.Count)." $(if ($updates.Count -eq 0) { 'Success' } else { 'Warn' })
         Request-GwtUi @{ Action = 'KitUpdatesFound' }
     }
@@ -4941,6 +4943,16 @@ if ($SmokeTest) {
     # O autounattend.xml precisa ser XML válido.
     try { [xml](Get-GwtAutounattendXml -AccountName 'Teste') | Out-Null }
     catch { $issues += 'autounattend-xml-invalido' }
+
+    # Teste funcional da análise: usa a própria unidade do perfil (nada a copiar,
+    # roda em instantes) e confirma que o plano é montado sem erro de runtime.
+    try {
+        $profileDrive = ([System.IO.Path]::GetPathRoot($env:USERPROFILE)).TrimEnd('\')
+        Invoke-GwtAnalyzeWorker -Folders @($KnownFolders | Where-Object { $_.Key -eq 'Documents' }) -Drive $profileDrive
+        if (-not $sync.PlanValid) { $issues += 'analise-nao-validou' }
+        if (@($sync.Plan).Count -lt 1) { $issues += 'analise-sem-plano' }
+    }
+    catch { $issues += "analise-excecao:$($_.Exception.Message)" }
     if ($issues) {
         Write-Host "SMOKETEST FALHOU — problemas: $($issues -join ', ')" -ForegroundColor Red
         exit 1
