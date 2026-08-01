@@ -99,6 +99,9 @@ $sync.KitDir         = $null
 $sync.IsoAppxList    = @()      # AppX provisionados encontrados na ISO montada
 $sync.CreateRestorePoint = $true   # criar ponto de restauração antes de alterar o sistema
 $sync.CancelRequested = $false     # pedido de cancelamento da operação em andamento
+$sync.SessionActions = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new())
+$sync.SessionStart   = Get-Date
+$sync.UpdateInfo     = $null       # preenchido quando há versão nova no GitHub
 
 New-Item -ItemType Directory -Path $sync.BackupRoot, $sync.LogRoot, $sync.ReportRoot -Force | Out-Null
 
@@ -767,6 +770,24 @@ function Set-GwtKnownFolderPath {
     }
 }
 
+# Registra uma ação executada, para o relatório de sessão.
+function Add-GwtAction {
+    param(
+        [string]$Categoria,
+        [string]$Item,
+        [ValidateSet('OK', 'Falha', 'Aviso', 'Info')]
+        [string]$Resultado = 'OK',
+        [string]$Detalhe = ''
+    )
+    [void]$sync.SessionActions.Add([pscustomobject]@{
+        Hora      = Get-Date
+        Categoria = $Categoria
+        Item      = $Item
+        Resultado = $Resultado
+        Detalhe   = $Detalhe
+    })
+}
+
 # Cria um ponto de restauração do sistema antes de mudanças relevantes.
 # Retorna $true se criou (ou se o usuário desativou a opção), $false em falha real.
 function New-GwtRestorePoint {
@@ -813,6 +834,7 @@ function New-GwtRestorePoint {
         catch { }
 
         Add-GwtLog 'Ponto de restauração criado com sucesso.' 'Success'
+        Add-GwtAction -Categoria 'Segurança' -Item 'Ponto de restauração criado' -Resultado 'OK' -Detalhe $Reason
         return $true
     }
     catch {
@@ -1107,6 +1129,7 @@ function Invoke-GwtMigrationWorker {
             if (-not $CopyOnly) {
                 Set-GwtKnownFolderPath -Guid $item.Guid -Path $item.TargetPath
                 Add-GwtLog "$($item.PlainName): atalho do Explorer atualizado para o novo local." 'Success'
+                Add-GwtAction -Categoria 'MigraÃ§Ã£o de pastas' -Item $item.PlainName -Resultado 'OK' -Detalhe "$($item.CurrentPath) -> $($item.TargetPath) ($($item.SizeText))"
 
                 if ($RenameSource) {
                     try {
@@ -1316,6 +1339,7 @@ function Invoke-GwtWingetWorker {
             if ($code -eq 0) {
                 $okList.Add($pkg.Name)
                 Add-GwtLog "$($pkg.Name): instalado." 'Success'
+                Add-GwtAction -Categoria 'Programas instalados' -Item $pkg.Name -Resultado 'OK' -Detalhe $pkgId
             }
             else {
                 $failList.Add("$($pkg.Name) (0x$('{0:X8}' -f $code))")
@@ -1389,7 +1413,7 @@ function Invoke-GwtWingetUninstallWorker {
                 if ($line -and $line.Length -le 220 -and $line -notmatch '^[\s\-\\|/█▒░]+$') { Add-GwtLog "    $line" }
             }
             $code = $LASTEXITCODE
-            if ($code -eq 0) { $okList.Add($pkg.Name); Add-GwtLog "$($pkg.Name): desinstalado." 'Success' }
+            if ($code -eq 0) { $okList.Add($pkg.Name); Add-GwtLog "$($pkg.Name): desinstalado." 'Success'; Add-GwtAction -Categoria 'Programas removidos' -Item $pkg.Name -Resultado 'OK' }
             else { $failList.Add($pkg.Name); Add-GwtLog "$($pkg.Name): não desinstalado (código 0x$('{0:X8}' -f $code) — talvez não esteja instalado)." 'Warn' }
             $sync.ProgressValue = [double]$index
         }
@@ -2022,6 +2046,7 @@ function Invoke-GwtApplyKeysWorker {
                 Invoke-GwtOpData -Key $key
                 if ($sync.OpData[$key] -and $sync.OpData[$key].ContainsKey('Explorer')) { $needExplorer = $true }
                 Add-GwtLog "${key}: aplicado." 'Success'
+                Add-GwtAction -Categoria $Title -Item $key -Resultado 'OK'
             }
             catch {
                 $failed++
@@ -2064,6 +2089,7 @@ function Invoke-GwtDebloatWorker {
                     Where-Object { $_.DisplayName -eq $pkg.Id } |
                     Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue | Out-Null
                 Add-GwtLog "$($pkg.Name): removido (ou já ausente)." 'Success'
+                Add-GwtAction -Categoria 'Apps da Store removidos' -Item $pkg.Name -Resultado 'OK'
                 $ok++
             }
             catch { Add-GwtLog "$($pkg.Name): $($_.Exception.Message)" 'Warn' }
@@ -2104,6 +2130,7 @@ function Invoke-GwtFeatureWorker {
                     Invoke-GwtFeatureSpecial -Special $feat.Special
                 }
                 Add-GwtLog "$($feat.Name): ativado." 'Success'
+                Add-GwtAction -Categoria 'Recursos do Windows' -Item $feat.Name -Resultado 'OK'
             }
             catch {
                 $failed++
@@ -2965,6 +2992,108 @@ function Invoke-GwtMonitorWorker {
     }
 }
 
+function Invoke-GwtUpdateCheckWorker {
+    # Consulta a última release publicada e avisa se houver versão nova.
+    try {
+        $api = 'https://api.github.com/repos/leddzeppellin/genius-windows-toolkit/releases/latest'
+        $resp = Invoke-RestMethod -Uri $api -Headers @{ 'User-Agent' = 'GeniusWindowsToolkit' } -TimeoutSec 8
+        $tag = ([string]$resp.tag_name).TrimStart('v', 'V')
+        if ([string]::IsNullOrWhiteSpace($tag)) { return }
+
+        $atual = [version]$sync.Version
+        $ultima = $null
+        if (-not [version]::TryParse($tag, [ref]$ultima)) { return }
+
+        if ($ultima -gt $atual) {
+            $sync.UpdateInfo = [pscustomobject]@{ Versao = $tag; Url = [string]$resp.html_url }
+            Add-GwtLog "Existe uma versão mais nova disponível: v$tag (você está na v$($sync.Version))." 'Warn'
+            Request-GwtUi @{ Action = 'UpdateAvailable' }
+        }
+        else {
+            Add-GwtLog "Você está na versão mais recente (v$($sync.Version))." 'Info'
+        }
+    }
+    catch {
+        # Sem internet ou API indisponível: silencioso, não atrapalha o uso
+    }
+}
+
+function New-GwtSessionReport {
+    # Gera um relatório HTML do que foi feito nesta sessão (para anexar à OS).
+    $acoes = @($sync.SessionActions)
+    $fim = Get-Date
+    $dur = $fim - $sync.SessionStart
+    $duracao = '{0:00}h {1:00}min' -f [int]$dur.TotalHours, $dur.Minutes
+
+    $logoTag = ''
+    if (-not [string]::IsNullOrWhiteSpace($LogoBase64)) {
+        $logoTag = "<img class='logo' src='data:image/png;base64,$LogoBase64' alt='Genius Info'/>"
+    }
+
+    $linhas = New-Object System.Collections.Generic.List[string]
+    if ($acoes.Count -eq 0) {
+        $linhas.Add("<tr><td colspan='4' class='vazio'>Nenhuma ação foi executada nesta sessão.</td></tr>")
+    }
+    else {
+        foreach ($grupo in ($acoes | Group-Object Categoria)) {
+            $linhas.Add("<tr class='grupo'><td colspan='4'>$([System.Net.WebUtility]::HtmlEncode($grupo.Name)) — $($grupo.Count) item(ns)</td></tr>")
+            foreach ($a in $grupo.Group) {
+                $cls = switch ($a.Resultado) { 'Falha' { 'ruim' } 'Aviso' { 'aviso' } default { 'bom' } }
+                $item = [System.Net.WebUtility]::HtmlEncode([string]$a.Item)
+                $det = [System.Net.WebUtility]::HtmlEncode([string]$a.Detalhe)
+                $linhas.Add("<tr><td class='hora'>$($a.Hora.ToString('HH:mm'))</td><td>$item</td><td class='det'>$det</td><td class='$cls'>$($a.Resultado)</td></tr>")
+            }
+        }
+    }
+
+    $so = (Get-CimInstance Win32_OperatingSystem).Caption
+    $maq = Get-CimInstance Win32_ComputerSystem
+    $html = @"
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de atendimento — $env:COMPUTERNAME</title>
+<style>
+  body { font-family: Segoe UI, Arial, sans-serif; margin: 0; padding: 32px; background: #f4f6f8; color: #1f2430; }
+  .folha { max-width: 900px; margin: 0 auto; background: #fff; border-radius: 14px; padding: 32px; box-shadow: 0 2px 18px rgba(0,0,0,.08); }
+  .topo { display: flex; align-items: center; gap: 20px; border-bottom: 3px solid #F6AE2D; padding-bottom: 18px; margin-bottom: 22px; }
+  .logo { max-height: 74px; }
+  h1 { font-size: 21px; margin: 0 0 4px; }
+  .sub { color: #6b7280; font-size: 13px; }
+  .infos { display: flex; flex-wrap: wrap; gap: 26px; background: #f8fafc; border-radius: 10px; padding: 14px 18px; margin-bottom: 22px; font-size: 13px; }
+  .infos b { display: block; color: #6b7280; font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; background: #1f2430; color: #fff; padding: 9px 10px; }
+  td { padding: 8px 10px; border-bottom: 1px solid #eceff3; vertical-align: top; }
+  tr.grupo td { background: #fff8e8; font-weight: 700; color: #8a6100; border-top: 2px solid #F6AE2D; }
+  .hora { color: #9aa3af; white-space: nowrap; width: 58px; }
+  .det { color: #6b7280; font-size: 12px; }
+  .bom { color: #0f7b3d; font-weight: 600; } .ruim { color: #b91c1c; font-weight: 600; } .aviso { color: #b45309; font-weight: 600; }
+  .vazio { text-align: center; color: #9aa3af; padding: 26px; }
+  .rodape { margin-top: 26px; padding-top: 14px; border-top: 1px solid #eceff3; color: #9aa3af; font-size: 12px; display: flex; justify-content: space-between; }
+</style></head><body><div class="folha">
+  <div class="topo">$logoTag<div><h1>Relatório de atendimento técnico</h1>
+  <div class="sub">Genius Windows Toolkit v$($sync.Version) — por Ricardo Valério S.</div></div></div>
+  <div class="infos">
+    <div><b>Computador</b>$env:COMPUTERNAME</div>
+    <div><b>Usuário</b>$env:USERNAME</div>
+    <div><b>Fabricante / Modelo</b>$($maq.Manufacturer) $($maq.Model)</div>
+    <div><b>Sistema</b>$so</div>
+    <div><b>Data</b>$($fim.ToString('dd/MM/yyyy HH:mm'))</div>
+    <div><b>Duração</b>$duracao</div>
+    <div><b>Ações</b>$($acoes.Count)</div>
+  </div>
+  <table><thead><tr><th>Hora</th><th>Item</th><th>Detalhe</th><th>Resultado</th></tr></thead>
+  <tbody>
+$($linhas -join "`r`n")
+  </tbody></table>
+  <div class="rodape"><span>Backups e logs desta sessão: $($sync.AppRoot)</span><span>Gerado automaticamente</span></div>
+</div></body></html>
+"@
+
+    $arquivo = Join-Path $sync.ReportRoot ("atendimento-{0}-{1}.html" -f $env:COMPUTERNAME, $sync.SessionStamp)
+    Set-Content -LiteralPath $arquivo -Value $html -Encoding UTF8
+    return $arquivo
+}
+
 function Invoke-GwtDiagnosticWorker {
     try {
         $sync.Busy = $true
@@ -3376,6 +3505,8 @@ function Invoke-GwtRunspace {
                         <Button Name="ImportPresetButton" Style="{StaticResource GhostButton}" Content="📥  Importar preset" Margin="0,0,0,8"/>
                         <Button Name="OpenBackupsButton" Style="{StaticResource GhostButton}" Content="🗂️  Abrir backups" Margin="0,0,0,8"/>
                         <Button Name="OpenLogsButton" Style="{StaticResource GhostButton}" Content="📜  Abrir logs" Margin="0,0,0,8"/>
+                        <Button Name="SessionReportButton" Style="{StaticResource GhostButton}" Content="📋  Relatório da sessão" Margin="0,0,0,8"
+                                ToolTip="Gera um relatório HTML com tudo o que foi feito nesta máquina — bom para anexar à ordem de serviço."/>
                         <Button Name="RestoreRegButton" Style="{StaticResource GhostButton}" Content="♻️  Restaurar backup .reg" Margin="0,0,0,8"/>
                     </StackPanel>
 
@@ -5193,6 +5324,19 @@ $sync.Controls['CancelButton'].Add_Click({
     Add-GwtLog 'Cancelamento solicitado — a operação para após concluir o item atual.' 'Warn'
 })
 
+$sync.Controls['SessionReportButton'].Add_Click({
+    try {
+        $arquivo = New-GwtSessionReport
+        $qtd = @($sync.SessionActions).Count
+        Add-GwtLog "Relatório da sessão gerado ($qtd ação(ões)): $arquivo" 'Success'
+        Start-Process $arquivo
+    }
+    catch {
+        Add-GwtLog "Falha ao gerar o relatório: $($_.Exception.Message)" 'Error'
+        [System.Windows.MessageBox]::Show($Window, $_.Exception.Message, 'Erro no relatório', 'OK', 'Error') | Out-Null
+    }
+})
+
 $sync.Controls['OpenBackupsButton'].Add_Click({ Start-Process explorer.exe $sync.BackupRoot })
 $sync.Controls['OpenLogsButton'].Add_Click({ Start-Process explorer.exe $sync.LogRoot })
 $sync.Controls['OpenReportsButton'].Add_Click({ Start-Process explorer.exe $sync.ReportRoot })
@@ -5314,6 +5458,16 @@ function Invoke-PendingUiAction {
                 }
             }
             finally { $script:DialogOpen = $false }
+        }
+        'UpdateAvailable' {
+            $info = $sync.UpdateInfo
+            if (-not $info) { break }
+            $txt = $sync.Controls['TitleVersionText']
+            $txt.Text = "v$($sync.Version)  →  v$($info.Versao) disponível"
+            $txt.Foreground = $Window.Resources['GoldBrush']
+            $txt.Cursor = 'Hand'
+            $txt.ToolTip = 'Clique para abrir a página da nova versão'
+            $txt.Add_MouseLeftButtonUp({ try { Start-Process $sync.UpdateInfo.Url } catch { } })
         }
         'MarkInstalled' {
             $installed = $sync['DetectedInstalled']
@@ -5449,6 +5603,10 @@ catch { $sync.Online = $false }
 
 if ($sync.Online) {
     Add-GwtLog 'Internet detectada — todos os recursos disponíveis.' 'Success'
+    # Verifica em segundo plano se há versão nova (não bloqueia a interface)
+    if (-not $SmokeTest) {
+        Invoke-GwtRunspace -ScriptBlock { Invoke-GwtUpdateCheckWorker }
+    }
 }
 else {
     Add-GwtLog 'Sem internet (modo offline). Funcionam normalmente: migração de pastas, rede, ajustes, privacidade, diagnóstico, e modificar/gravar uma ISO local.' 'Warn'
@@ -5475,7 +5633,7 @@ if ($SmokeTest) {
                   'IsoProfileConservador', 'IsoProfileRecomendado', 'IsoProfileAgressivo',
                   'IsoKeepEditionsCheck', 'IsoDriverFolderBox', 'IsoExtraFolderBox',
                   'KitOpenButton', 'MonitorIntervalBox', 'MonitorPresetCheck',
-                  'RestorePointCheck', 'CancelButton',
+                  'RestorePointCheck', 'CancelButton', 'SessionReportButton',
                   'LogBox', 'Progress', 'StatusText') + $ActionButtons
     foreach ($name in $required) {
         if (-not $sync.Controls.ContainsKey($name) -or $null -eq $sync.Controls[$name]) { $issues += $name }
@@ -5490,6 +5648,20 @@ if ($SmokeTest) {
     # O autounattend.xml precisa ser XML válido.
     try { [xml](Get-GwtAutounattendXml -AccountName 'Teste') | Out-Null }
     catch { $issues += 'autounattend-xml-invalido' }
+
+    # O relatório de sessão precisa gerar HTML válido, com e sem ações.
+    try {
+        Add-GwtAction -Categoria 'Teste' -Item 'Item de exemplo' -Resultado 'OK' -Detalhe 'detalhe'
+        $rel = New-GwtSessionReport
+        if (-not (Test-Path $rel)) { $issues += 'relatorio-nao-gerado' }
+        else {
+            $conteudo = Get-Content $rel -Raw
+            if ($conteudo -notmatch '<html' -or $conteudo -notmatch 'Item de exemplo') { $issues += 'relatorio-sem-conteudo' }
+            Remove-Item $rel -Force -ErrorAction SilentlyContinue
+        }
+        $sync.SessionActions.Clear()
+    }
+    catch { $issues += "relatorio-excecao:$($_.Exception.Message)" }
 
     # Os perfis da ISO precisam marcar conjuntos diferentes de ajustes.
     Set-GwtIsoProfile -Perfil 'Conservador'
