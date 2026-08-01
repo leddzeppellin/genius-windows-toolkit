@@ -1,4 +1,4 @@
-# Cria um atalho "Genius Windows Toolkit" na Área de Trabalho, apontando para o
+﻿# Cria um atalho "Genius Windows Toolkit" na Área de Trabalho, apontando para o
 # launcher Admin e usando o ícone da marca (assets\genius-info.ico).
 $appDir = Split-Path -Parent $PSScriptRoot   # pasta do app (pai de \tools)
 

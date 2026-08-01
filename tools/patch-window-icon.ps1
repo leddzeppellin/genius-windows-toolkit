@@ -1,4 +1,4 @@
-# Insere (uma vez) o código que define o ícone da janela a partir de $IconBase64.
+﻿# Insere (uma vez) o código que define o ícone da janela a partir de $IconBase64.
 $target = Join-Path $PSScriptRoot '..\GeniusToolkit.ps1'
 $target = (Resolve-Path $target).Path
 $text = [IO.File]::ReadAllText($target, [Text.Encoding]::UTF8)

@@ -1,4 +1,4 @@
-# Lê assets\genius-info-logo.png, gera base64 e injeta na linha $LogoBase64 = '...'
+﻿# Lê assets\genius-info-logo.png, gera base64 e injeta na linha $LogoBase64 = '...'
 # do GeniusToolkit.ps1 (mantém a execução via irm|iex autossuficiente).
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $logo = Join-Path $root 'assets\genius-info-logo.png'

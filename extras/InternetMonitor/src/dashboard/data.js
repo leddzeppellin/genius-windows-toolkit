@@ -1,1 +1,1 @@
-﻿window.INTERNET_MONITOR_DATA=[];window.INTERNET_MONITOR_CONFIG={"downloadMinMbps":500,"uploadMinMbps":500,"pingMaxMs":50,"jitterMaxMs":20,"packetLossMaxPct":1,"collectionIntervalMinutes":60,"staleAfterMinutes":150};
+window.INTERNET_MONITOR_DATA=[];window.INTERNET_MONITOR_CONFIG={"downloadMinMbps":500,"uploadMinMbps":500,"pingMaxMs":50,"jitterMaxMs":20,"packetLossMaxPct":1,"collectionIntervalMinutes":60,"staleAfterMinutes":150};

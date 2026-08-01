@@ -1,4 +1,4 @@
-# Garante CRLF (ASCII) nos arquivos .bat (batch do Windows).
+﻿# Garante CRLF (ASCII) nos arquivos .bat (batch do Windows).
 $dir = Join-Path $PSScriptRoot '..'
 foreach ($name in 'Genius-Toolkit.bat', 'Genius-Toolkit-Admin.bat', 'Criar-Atalho-Desktop.bat') {
     $path = Join-Path $dir $name

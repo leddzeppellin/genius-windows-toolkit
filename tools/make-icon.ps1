@@ -1,4 +1,4 @@
-# Gera um ícone quadrado (o "G" da logo) em .ico multi-resolução + PNG base64
+﻿# Gera um ícone quadrado (o "G" da logo) em .ico multi-resolução + PNG base64
 # para o ícone da janela. Recorta a região superior-central da logo.
 param([switch]$PreviewOnly)
 

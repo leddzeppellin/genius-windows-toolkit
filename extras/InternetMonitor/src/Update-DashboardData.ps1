@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$Root = $PSScriptRoot,
     [ValidateRange(1, 50000)]

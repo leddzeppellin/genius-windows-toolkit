@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [ValidateRange(15, 1440)]
     [int]$IntervalMinutes = 60,

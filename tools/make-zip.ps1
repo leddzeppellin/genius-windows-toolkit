@@ -1,4 +1,4 @@
-# Monta o pacote portátil (GeniusToolkit-portable.zip) para uso offline no pendrive.
+﻿# Monta o pacote portátil (GeniusToolkit-portable.zip) para uso offline no pendrive.
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $staging = Join-Path $env:TEMP ("gwt_pkg_" + [guid]::NewGuid().ToString('N').Substring(0,8))
 $dest = Join-Path $root 'GeniusToolkit-portable.zip'

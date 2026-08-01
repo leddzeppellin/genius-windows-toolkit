@@ -1,4 +1,4 @@
-param([string]$Url = 'https://bit.ly/genius-toolkit')
+﻿param([string]$Url = 'https://bit.ly/genius-toolkit')
 
 # Segue redirecionamentos manualmente e mostra a cadeia, sem executar conteúdo.
 $current = $Url

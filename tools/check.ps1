@@ -40,3 +40,27 @@ if (Test-Path $loader) {
     }
     Write-Host 'LOADER OK (ASCII puro, sem BOM)' -ForegroundColor Green
 }
+
+# Scripts auxiliares (.ps1 em extras\ e tools\) precisam de BOM UTF-8: sem ele o
+# PowerShell 5.1 lê como ANSI e corrompe acentos ("histórico" -> "histÃ³rico").
+# Já os .json/.js/.css/.html NÃO podem ter BOM (quebra ConvertFrom-Json e JS).
+$encIssues = @()
+foreach ($dir in 'extras', 'tools') {
+    $full = Join-Path (Split-Path $Path) $dir
+    if (-not (Test-Path $full)) { continue }
+    Get-ChildItem -LiteralPath $full -Recurse -File | ForEach-Object {
+        $ext = $_.Extension.ToLower()
+        if ($ext -notin '.ps1', '.psm1', '.json', '.js', '.css', '.html') { return }
+        $b = [IO.File]::ReadAllBytes($_.FullName)
+        $hasBom = ($b.Length -ge 3 -and $b[0] -eq 239 -and $b[1] -eq 187 -and $b[2] -eq 191)
+        $wantBom = ($ext -in '.ps1', '.psm1')
+        if ($wantBom -and -not $hasBom) { $encIssues += "sem BOM (deveria ter): $($_.FullName)" }
+        if (-not $wantBom -and $hasBom) { $encIssues += "com BOM (não deveria): $($_.FullName)" }
+    }
+}
+if ($encIssues.Count -gt 0) {
+    foreach ($i in $encIssues) { Write-Host "ERRO encoding: $i" -ForegroundColor Red }
+    Write-Host 'Rode: powershell -File tools\fix-encoding.ps1' -ForegroundColor Yellow
+    exit 1
+}
+Write-Host 'ENCODING OK (extras/tools)' -ForegroundColor Green

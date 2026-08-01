@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 $dashboard = Join-Path $PSScriptRoot "dashboard\index.html"
 $dashboardUpdater = Join-Path $root "Update-DashboardData.ps1"
