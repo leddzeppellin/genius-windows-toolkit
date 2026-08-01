@@ -3498,17 +3498,20 @@ function Invoke-GwtRunspace {
                         </StackPanel>
                     </Border>
 
-                    <StackPanel Grid.Row="2" Margin="0,16,0,0">
-                        <TextBlock Text="Atalhos" FontWeight="Bold" Margin="0,0,0,10"/>
-                        <Button Name="ElevateButton" Content="🛡️  Abrir como Administrador" HorizontalContentAlignment="Left" Margin="0,0,0,8"/>
-                        <Button Name="ExportPresetButton" Style="{StaticResource GhostButton}" Content="📤  Exportar preset" Margin="0,0,0,8"/>
-                        <Button Name="ImportPresetButton" Style="{StaticResource GhostButton}" Content="📥  Importar preset" Margin="0,0,0,8"/>
-                        <Button Name="OpenBackupsButton" Style="{StaticResource GhostButton}" Content="🗂️  Abrir backups" Margin="0,0,0,8"/>
-                        <Button Name="OpenLogsButton" Style="{StaticResource GhostButton}" Content="📜  Abrir logs" Margin="0,0,0,8"/>
-                        <Button Name="SessionReportButton" Style="{StaticResource GhostButton}" Content="📋  Relatório da sessão" Margin="0,0,0,8"
-                                ToolTip="Gera um relatório HTML com tudo o que foi feito nesta máquina — bom para anexar à ordem de serviço."/>
-                        <Button Name="RestoreRegButton" Style="{StaticResource GhostButton}" Content="♻️  Restaurar backup .reg" Margin="0,0,0,8"/>
-                    </StackPanel>
+                    <!-- ScrollViewer: se a janela for baixa, os atalhos rolam em vez de sumirem -->
+                    <ScrollViewer Grid.Row="2" Margin="0,14,0,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                            <TextBlock Text="Atalhos" FontWeight="Bold" Margin="0,0,0,8"/>
+                            <Button Name="ElevateButton" Content="🛡️  Abrir como Administrador" HorizontalContentAlignment="Left" Margin="0,0,0,6" Padding="12,7" MinHeight="32"/>
+                            <Button Name="ExportPresetButton" Style="{StaticResource GhostButton}" Content="📤  Exportar preset" Margin="0,0,0,6" Padding="12,7" MinHeight="32"/>
+                            <Button Name="ImportPresetButton" Style="{StaticResource GhostButton}" Content="📥  Importar preset" Margin="0,0,0,6" Padding="12,7" MinHeight="32"/>
+                            <Button Name="OpenBackupsButton" Style="{StaticResource GhostButton}" Content="🗂️  Abrir backups" Margin="0,0,0,6" Padding="12,7" MinHeight="32"/>
+                            <Button Name="OpenLogsButton" Style="{StaticResource GhostButton}" Content="📜  Abrir logs" Margin="0,0,0,6" Padding="12,7" MinHeight="32"/>
+                            <Button Name="SessionReportButton" Style="{StaticResource GoldButton}" Content="📋  Relatório da sessão" Margin="0,0,0,6" Padding="12,7" MinHeight="32"
+                                    ToolTip="Gera um relatório HTML com tudo o que foi feito nesta máquina — bom para anexar à ordem de serviço."/>
+                            <Button Name="RestoreRegButton" Style="{StaticResource GhostButton}" Content="♻️  Restaurar backup .reg" Margin="0,0,0,6" Padding="12,7" MinHeight="32"/>
+                        </StackPanel>
+                    </ScrollViewer>
 
                     <StackPanel Grid.Row="3">
                         <Border Background="{StaticResource SoftBrush}" CornerRadius="10" Padding="10" Margin="0,0,0,8">
