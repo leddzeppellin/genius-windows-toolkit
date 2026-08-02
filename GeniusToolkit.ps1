@@ -790,6 +790,31 @@ function Get-GwtToolsFile {
     return (Join-Path $sync.AppRoot 'ferramentas.json')
 }
 
+# Extrai a URL de um comando colado do README de um projeto. Aceita formatos como:
+#   irm https://site/x.ps1 | iex
+#   iwr -useb https://site/x.ps1 | iex
+#   iex (irm 'https://site/x.ps1')
+#   iex ((New-Object System.Net.WebClient).DownloadString('https://site/x.ps1'))
+#   powershell -c "irm https://site/x.ps1 | iex"
+#   & ([scriptblock]::Create((irm https://site/x.ps1)))
+#   curl -sL https://site/x.sh
+function Convert-GwtCommandToUrl {
+    param([string]$Texto)
+
+    $t = ([string]$Texto).Trim()
+    if ([string]::IsNullOrWhiteSpace($t)) { return $t }
+
+    # Já é apenas uma URL, sem comando em volta
+    if ($t -match '^https?://[^\s]+$') { return $t }
+
+    # Pega a primeira URL do texto, parando em aspas, parênteses, barra vertical etc.
+    $m = [regex]::Match($t, 'https?://[^\s''"|)>\]}]+')
+    if ($m.Success) {
+        return $m.Value.TrimEnd('.', ',', ';', ':')
+    }
+    return $t
+}
+
 # Converte o link da PÁGINA do GitHub para o link RAW (que é o que o irm precisa).
 # Ex.: github.com/user/repo/blob/main/x.ps1 -> raw.githubusercontent.com/user/repo/main/x.ps1
 function Convert-GwtGitHubUrl {
@@ -3941,7 +3966,8 @@ function Invoke-GwtRunspace {
                                                         <ColumnDefinition Width="*"/>
                                                     </Grid.ColumnDefinitions>
                                                     <TextBlock Text="URL:" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                                    <TextBox Grid.Column="1" Name="ExtToolUrlBox" VerticalContentAlignment="Center" ToolTip="Ex.: https://exemplo.com/script.ps1 — será executado com irm URL | iex"/>
+                                                    <TextBox Grid.Column="1" Name="ExtToolUrlBox" VerticalContentAlignment="Center"
+                                                             ToolTip="Cole a URL ou o comando inteiro do projeto (ex.: irm https://site/x.ps1 | iex) — a URL é extraída sozinha."/>
                                                 </Grid>
                                                 <WrapPanel>
                                                     <CheckBox Name="ExtToolAdminCheck" Content="Como Administrador" IsChecked="True" VerticalAlignment="Center" Margin="0,0,12,8" FontSize="12"/>
@@ -3951,7 +3977,7 @@ function Invoke-GwtRunspace {
                                                     <Button Name="ExtToolCancelButton" Style="{StaticResource GhostButton}" Content="✖ Cancelar edição" Margin="0,0,8,8" Visibility="Collapsed"/>
                                                     <Button Name="ExtToolHelpButton" Style="{StaticResource GhostButton}" Content="❓ Onde acho a URL?" Margin="0,0,0,8"/>
                                                 </WrapPanel>
-                                                <TextBlock Text="Dica: clique com o botão direito numa ferramenta para editar ou remover. Pode colar o link da página do GitHub — ele é convertido para o link direto automaticamente." Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                                                <TextBlock Text="Dica: cole o comando do projeto (irm ... | iex) ou o link da página do GitHub — o toolkit extrai e converte a URL sozinho. Botão direito numa ferramenta para editar ou remover." Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"/>
                                             </StackPanel>
                                         </Border>
 
@@ -5603,6 +5629,14 @@ $sync.Controls['ExtToolAddButton'].Add_Click({
         return
     }
 
+    # Colou o comando inteiro do README? Extrai só a URL.
+    $extraida = Convert-GwtCommandToUrl -Texto $url
+    if ($extraida -ne $url) {
+        Add-GwtLog "Comando reconhecido — URL extraída: $extraida" 'Info'
+        $url = $extraida
+        $sync.Controls['ExtToolUrlBox'].Text = $url
+    }
+
     # A URL aponta mesmo para um script?
     $problema = Test-GwtToolUrl -Url $url
     if ($problema) {
@@ -5662,9 +5696,11 @@ $sync.Controls['ExtToolHelpButton'].Add_Click({
     $texto = @"
 A URL precisa apontar para o ARQUIVO do script, não para a página do projeto.
 
-1) Muitos projetos publicam o comando pronto no README, por exemplo:
+1) MAIS FÁCIL: copie o comando inteiro que o projeto publica no README e cole
+   aqui do jeito que está, por exemplo:
    irm https://christitus.com/win | iex
-   Nesse caso, use só a parte do endereço (https://christitus.com/win).
+   O toolkit reconhece o comando e extrai a URL sozinho. Funciona também com
+   iwr, iex (irm '...'), DownloadString e variações.
 
 2) Se o projeto não tem endereço curto, pegue o link direto no GitHub:
    - Abra o arquivo .ps1 no repositório
