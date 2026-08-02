@@ -128,10 +128,20 @@ $sourcePath = Join-Path $PSScriptRoot "src"
 $files = @(
     "Collect-Internet.ps1",
     "Open-Dashboard.ps1",
-    "Update-DashboardData.ps1"
+    "Update-DashboardData.ps1",
+    "Configure-Monitor.ps1",
+    "Export-Report.ps1",
+    "List-Servers.ps1",
+    "Test-Now.ps1"
 )
 foreach ($file in $files) {
-    Copy-Item -LiteralPath (Join-Path $sourcePath $file) -Destination (Join-Path $InstallPath $file) -Force
+    $origem = Join-Path $sourcePath $file
+    if (Test-Path -LiteralPath $origem) {
+        Copy-Item -LiteralPath $origem -Destination (Join-Path $InstallPath $file) -Force
+    }
+    else {
+        Write-Warning "Componente ausente no pacote (ignorado): $file"
+    }
 }
 Copy-Item -Path (Join-Path $sourcePath "dashboard\*") -Destination (Join-Path $InstallPath "dashboard") -Recurse -Force
 
@@ -175,16 +185,34 @@ Register-ScheduledTask -TaskName $TaskCollector -Action $collectorAction -Trigge
         "Executa o Speedtest CLI a cada $IntervalMinutes minutos e grava o histórico local."
     ) -Force | Out-Null
 
-Write-Step "Criando o atalho na Área de Trabalho"
+Write-Step "Criando os atalhos na Área de Trabalho"
 $desktop = [Environment]::GetFolderPath("Desktop")
-$shortcutPath = Join-Path $desktop "Internet Monitor.lnk"
 $shell = New-Object -ComObject WScript.Shell
-$shortcut = $shell.CreateShortcut($shortcutPath)
+
+# Painel de medições (dashboard)
+$shortcut = $shell.CreateShortcut((Join-Path $desktop "Internet Monitor.lnk"))
 $shortcut.TargetPath = $powerShellExe
-$shortcut.Arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\InternetMonitor\Open-Dashboard.ps1"'
+$shortcut.Arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $InstallPath "Open-Dashboard.ps1")
 $shortcut.WorkingDirectory = $InstallPath
+$shortcut.Description = "Painel com o histórico de medições da internet"
 $shortcut.IconLocation = "$env:SystemRoot\System32\netshell.dll,0"
 $shortcut.Save()
+
+# Painel de configuração (intervalo, limites, servidor) — só se o componente existir
+$configScript = Join-Path $InstallPath "Configure-Monitor.ps1"
+if (Test-Path -LiteralPath $configScript) {
+    $cfgShortcut = $shell.CreateShortcut((Join-Path $desktop "Internet Monitor - Configurar.lnk"))
+    $cfgShortcut.TargetPath = $powerShellExe
+    $cfgShortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $configScript
+    $cfgShortcut.WorkingDirectory = $InstallPath
+    $cfgShortcut.Description = "Configurar intervalo, limites e servidor do Internet Monitor"
+    $cfgShortcut.IconLocation = "$env:SystemRoot\System32\shell32.dll,316"
+    $cfgShortcut.Save()
+    Write-Host "  Atalhos criados: painel de medições e painel de configuração."
+}
+else {
+    Write-Host "  Atalho criado: painel de medições."
+}
 
 if (-not $NoInitialTest) {
     Write-Step "Executando a primeira medição (pode levar alguns minutos)"

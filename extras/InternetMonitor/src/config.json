@@ -1,9 +1,14 @@
 {
-  "downloadMinMbps": 500,
-  "uploadMinMbps": 500,
-  "pingMaxMs": 50,
-  "jitterMaxMs": 20,
-  "packetLossMaxPct": 1,
-  "collectionIntervalMinutes": 60,
-  "staleAfterMinutes": 150
+    "servidorFixoId":  0,
+    "downloadMinMbps":  500,
+    "uploadMinMbps":  500,
+    "pingMaxMs":  50,
+    "jitterMaxMs":  20,
+    "packetLossMaxPct":  1,
+    "provedorContratado":  "700",
+    "planoContratado":  "Acelera 700",
+    "contratadoDownloadMbps":  700,
+    "contratadoUploadMbps":  700,
+    "collectionIntervalMinutes":  60,
+    "staleAfterMinutes":  150
 }

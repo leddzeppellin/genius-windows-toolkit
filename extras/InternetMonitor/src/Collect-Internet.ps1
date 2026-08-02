@@ -65,26 +65,56 @@ try {
         throw "speedtest.exe não encontrado em $SpeedtestExe"
     }
 
-    $tempOut = Join-Path $env:TEMP ("internet-monitor-{0}.json" -f [guid]::NewGuid())
-    $tempErr = Join-Path $env:TEMP ("internet-monitor-{0}.log" -f [guid]::NewGuid())
+    # Executado via System.Diagnostics.Process porque com "Start-Process -PassThru"
+    # (sem -Wait) a propriedade ExitCode volta NULA — e "$null -ne 0" fazia o script
+    # tratar TODA medição bem-sucedida como falha.
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $SpeedtestExe
+    $psi.Arguments = "--accept-license --accept-gdpr --format=json"
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $psi
     try {
-        $process = Start-Process -FilePath $SpeedtestExe -ArgumentList @(
-            "--accept-license", "--accept-gdpr", "--format=json"
-        ) -NoNewWindow -PassThru -RedirectStandardOutput $tempOut -RedirectStandardError $tempErr
+        [void]$process.Start()
+        # Leitura assíncrona dos dois fluxos evita travamento se um deles encher
+        $outTask = $process.StandardOutput.ReadToEndAsync()
+        $errTask = $process.StandardError.ReadToEndAsync()
 
         if (-not $process.WaitForExit(480000)) {
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            try { $process.Kill() } catch { }
             throw "O Speedtest excedeu o limite de 8 minutos."
         }
-        $process.WaitForExit()
-        $stdout = Get-Content -LiteralPath $tempOut -Raw -ErrorAction SilentlyContinue
-        $stderr = Get-Content -LiteralPath $tempErr -Raw -ErrorAction SilentlyContinue
-        if ($process.ExitCode -ne 0) {
-            throw "Speedtest retornou código $($process.ExitCode): $stderr"
+
+        $stdout = $outTask.Result
+        $stderr = $errTask.Result
+        $exitCode = $process.ExitCode
+
+        if ($exitCode -ne 0) {
+            $detalhe = if ([string]::IsNullOrWhiteSpace($stderr)) { "(sem detalhes)" } else { $stderr.Trim() }
+            throw "Speedtest retornou código ${exitCode}: $detalhe"
         }
         if (-not $stdout) { throw "O Speedtest não retornou dados." }
 
-        $result = $stdout | ConvertFrom-Json
+        # O Speedtest emite avisos não fatais (ex.: "Cannot open socket") e ainda
+        # assim conclui a medição. Registramos como aviso, sem interromper.
+        if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+            Write-ErrorLog ("Aviso do Speedtest (medição concluída mesmo assim): {0}" -f $stderr.Trim())
+        }
+
+        # A saída pode ter mais de uma linha JSON (logs + resultado): usa a do resultado.
+        $linhaResultado = $stdout -split "`r?`n" |
+            Where-Object { $_.Trim() -and $_ -match '"type"\s*:\s*"result"' } |
+            Select-Object -Last 1
+        if (-not $linhaResultado) {
+            $linhaResultado = $stdout -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -Last 1
+        }
+
+        $result = $linhaResultado | ConvertFrom-Json
+        if ($null -eq $result.download) { throw "Resposta do Speedtest sem dados de medição." }
         $loss = if ($null -ne $result.packetLoss) {
             [math]::Round([double]$result.packetLoss, 2)
         } else { "" }
@@ -110,8 +140,7 @@ try {
         Update-Dashboard
     }
     finally {
-        Remove-Item -LiteralPath $tempOut -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $tempErr -Force -ErrorAction SilentlyContinue
+        if ($process) { $process.Dispose() }
     }
 }
 catch {

@@ -19,9 +19,12 @@ foreach ($task in $tasks) {
     }
 }
 
-$shortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "Internet Monitor.lnk"
-if (Test-Path -LiteralPath $shortcut) {
-    Remove-Item -LiteralPath $shortcut -Force
+$desktop = [Environment]::GetFolderPath("Desktop")
+foreach ($nome in @("Internet Monitor.lnk", "Internet Monitor - Configurar.lnk")) {
+    $shortcut = Join-Path $desktop $nome
+    if (Test-Path -LiteralPath $shortcut) {
+        Remove-Item -LiteralPath $shortcut -Force
+    }
 }
 
 if (Test-Path -LiteralPath $InstallPath) {
