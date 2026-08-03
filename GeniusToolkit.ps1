@@ -3030,20 +3030,52 @@ function Get-GwtMonitorSource {
     }
 
     Add-GwtLog 'Arquivos locais não encontrados — baixando do GitHub...'
-    $base = 'https://raw.githubusercontent.com/leddzeppellin/genius-windows-toolkit/main/extras/InternetMonitor'
-    $files = @(
-        'Install-InternetMonitor.ps1', 'Uninstall-InternetMonitor.ps1',
-        'src/Collect-Internet.ps1', 'src/Open-Dashboard.ps1', 'src/Update-DashboardData.ps1',
-        'src/config.json', 'src/dashboard/index.html', 'src/dashboard/app.js',
-        'src/dashboard/styles.css', 'src/dashboard/data.js'
-    )
+    $repo = 'leddzeppellin/genius-windows-toolkit'
+    $ramo = 'main'
+    $prefixo = 'extras/InternetMonitor/'
+    $base = "https://raw.githubusercontent.com/$repo/$ramo/$($prefixo.TrimEnd('/'))"
+
+    # A lista vem da árvore do repositório, para que componentes novos sejam
+    # baixados sozinhos (antes era fixa, e scripts adicionados depois ficavam
+    # de fora da instalação feita por irm | iex).
+    $files = @()
+    try {
+        $arvore = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/git/trees/$ramo`?recursive=1" `
+                                    -Headers @{ 'User-Agent' = 'GeniusWindowsToolkit' } -TimeoutSec 20
+        $files = @($arvore.tree |
+            Where-Object { $_.type -eq 'blob' -and $_.path -like "$prefixo*" -and $_.path -notlike '*README.md' } |
+            ForEach-Object { $_.path.Substring($prefixo.Length) })
+        if ($files.Count -gt 0) { Add-GwtLog "Componentes encontrados no repositório: $($files.Count)" }
+    }
+    catch {
+        Add-GwtLog "Não foi possível listar os componentes pela API ($($_.Exception.Message)). Usando a lista padrão." 'Warn'
+    }
+
+    if ($files.Count -eq 0) {
+        $files = @(
+            'Install-InternetMonitor.ps1', 'Uninstall-InternetMonitor.ps1',
+            'src/Collect-Internet.ps1', 'src/Open-Dashboard.ps1', 'src/Update-DashboardData.ps1',
+            'src/Configure-Monitor.ps1', 'src/Export-Report.ps1', 'src/List-Servers.ps1',
+            'src/Test-Now.ps1', 'src/config.json', 'src/dashboard/index.html',
+            'src/dashboard/app.js', 'src/dashboard/styles.css', 'src/dashboard/data.js'
+        )
+    }
+
     $tmp = Join-Path $env:TEMP ("GwtMonitor_" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $baixados = 0
     foreach ($rel in $files) {
         $dest = Join-Path $tmp ($rel -replace '/', '\')
         New-Item -ItemType Directory -Path (Split-Path $dest -Parent) -Force | Out-Null
-        Invoke-WebRequest -Uri "$base/$rel" -OutFile $dest -UseBasicParsing
+        try {
+            Invoke-WebRequest -Uri "$base/$rel" -OutFile $dest -UseBasicParsing
+            $baixados++
+        }
+        catch {
+            Add-GwtLog "Falha ao baixar '$rel': $($_.Exception.Message)" 'Warn'
+        }
     }
-    Add-GwtLog "Arquivos baixados para: $tmp" 'Success'
+    if ($baixados -eq 0) { throw 'Nenhum componente do monitor pôde ser baixado. Verifique a conexão.' }
+    Add-GwtLog "$baixados componente(s) baixado(s) para: $tmp" 'Success'
     return $tmp
 }
 
