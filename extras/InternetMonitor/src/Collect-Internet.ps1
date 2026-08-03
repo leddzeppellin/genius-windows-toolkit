@@ -21,6 +21,49 @@ function Write-ErrorLog([string]$Message) {
 }
 
 function Save-Record([psobject]$Record) {
+    $colunas = @($Record.PSObject.Properties.Name)
+
+    if (Test-Path -LiteralPath $CsvPath) {
+        # O Export-Csv -Append falha se as colunas do histórico não forem
+        # exatamente as do registro. Quando o formato muda (versão nova do
+        # coletor), migramos o histórico em vez de perder a coleta.
+        $cabecalho = @()
+        try {
+            $linha1 = Get-Content -LiteralPath $CsvPath -TotalCount 1 -ErrorAction Stop
+            $cabecalho = @($linha1 -split ',' | ForEach-Object { $_.Trim().Trim('"').Trim([char]0xFEFF) })
+        }
+        catch { }
+
+        $incompativel = $cabecalho.Count -gt 0 -and
+                        @(Compare-Object -ReferenceObject $cabecalho -DifferenceObject $colunas).Count -gt 0
+
+        if ($incompativel) {
+            try {
+                $antigos = @(Import-Csv -LiteralPath $CsvPath)
+                $backup = Join-Path $DataPath ("historico-internet-formato-anterior-{0}.csv" -f (Get-Date).ToString("yyyyMMdd-HHmmss"))
+                Copy-Item -LiteralPath $CsvPath -Destination $backup -Force
+
+                $migrados = foreach ($linha in $antigos) {
+                    $novo = [ordered]@{}
+                    foreach ($c in $colunas) {
+                        $novo[$c] = if ($linha.PSObject.Properties.Name -contains $c) { $linha.$c } else { "" }
+                    }
+                    [PSCustomObject]$novo
+                }
+                if ($migrados) {
+                    $migrados | Export-Csv -LiteralPath $CsvPath -NoTypeInformation -Encoding UTF8
+                }
+                else {
+                    Remove-Item -LiteralPath $CsvPath -Force
+                }
+                Write-ErrorLog ("Formato do histórico atualizado ({0} registro(s) preservado(s)). Cópia do original: {1}" -f $antigos.Count, $backup)
+            }
+            catch {
+                Write-ErrorLog ("Falha ao migrar o histórico: {0}" -f $_.Exception.Message)
+            }
+        }
+    }
+
     if (Test-Path -LiteralPath $CsvPath) {
         $Record | Export-Csv -LiteralPath $CsvPath -Append -NoTypeInformation -Encoding UTF8
     }
@@ -51,11 +94,38 @@ function Empty-Record([string]$Status, [string]$Message) {
         PerdaPacotesPct = ""
         ISP = ""
         Servidor = ""
+        ServidorID = ""
         LocalServidor = ""
+        Conexao = ""
         URLResultado = ""
         Status = $Status
         Mensagem = $Message
     }
+}
+
+# Descobre se a medição saiu por cabo ou Wi-Fi, a partir do IP usado no teste.
+function Get-TipoConexao([string]$IpInterno) {
+    try {
+        $adaptador = $null
+        if ($IpInterno) {
+            $endereco = Get-NetIPAddress -IPAddress $IpInterno -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($endereco) {
+                $adaptador = Get-NetAdapter -InterfaceIndex $endereco.InterfaceIndex -ErrorAction SilentlyContinue
+            }
+        }
+        if (-not $adaptador) {
+            $adaptador = Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
+                Where-Object { $_.Status -eq "Up" } | Select-Object -First 1
+        }
+        if (-not $adaptador) { return "" }
+
+        if ($adaptador.NdisPhysicalMedium -eq 9 -or
+            $adaptador.InterfaceDescription -match "Wi-?Fi|Wireless|802\.11") {
+            return "Wi-Fi"
+        }
+        return "Ethernet"
+    }
+    catch { return "" }
 }
 
 try {
@@ -131,7 +201,9 @@ try {
             PerdaPacotesPct = $loss
             ISP = [string]$result.isp
             Servidor = [string]$result.server.name
+            ServidorID = [string]$result.server.id
             LocalServidor = [string]$result.server.location
+            Conexao = Get-TipoConexao -IpInterno ([string]$result.interface.internalIp)
             URLResultado = [string]$result.result.url
             Status = "Sucesso"
             Mensagem = ""
