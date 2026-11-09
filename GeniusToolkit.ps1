@@ -79,6 +79,7 @@ $sync.PlanTotalFiles = [long]0
 $sync.PlanFreeBytes  = [long]0
 $sync.PlanDrive      = ''
 $sync.DiagReport     = ''
+$sync.HardwareReport = ''
 $sync.RunspacePool   = $null
 $sync.Jobs           = [System.Collections.ArrayList]::new()
 $sync.Controls       = @{}
@@ -3323,10 +3324,603 @@ function Invoke-GwtDiagnosticWorker {
     }
 }
 
+# ----------------------------------------------------------------------------
+# Saúde do hardware: discos (S.M.A.R.T.), bateria, requisitos do Windows 11 e
+# dispositivos sem driver. Tudo somente leitura, via WMI/CIM e powercfg.
+# ----------------------------------------------------------------------------
+
+function Get-GwtDiskHealth {
+    $lista = New-Object System.Collections.Generic.List[object]
+
+    $elevado = $false
+    try {
+        $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $elevado = (New-Object Security.Principal.WindowsPrincipal($id)).IsInRole(
+            [Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch { }
+
+    $discos = @()
+    try { $discos = @(Get-PhysicalDisk -ErrorAction Stop) } catch { }
+
+    # Alguns controladores não expõem Get-PhysicalDisk; cai para Win32_DiskDrive.
+    if ($discos.Count -eq 0) {
+        try {
+            foreach ($d in @(Get-CimInstance Win32_DiskDrive -ErrorAction Stop)) {
+                $lista.Add([pscustomobject]@{
+                    Nome = [string]$d.Model; Tipo = 'Desconhecido'
+                    TamanhoGB = if ($d.Size) { [math]::Round($d.Size / 1GB, 1) } else { 0 }
+                    Saude = [string]$d.Status; Operacional = ''
+                    TemperaturaC = $null; DesgastePct = $null; HorasLigado = $null
+                    ErrosLeitura = $null; ErrosEscrita = $null; PrevisaoFalha = $null; SemPermissao = $false
+                })
+            }
+        } catch { }
+        return $lista.ToArray()
+    }
+
+    # Predição de falha do S.M.A.R.T. (quando o driver expõe)
+    $algumaPrevisao = $null
+    try {
+        $prev = @(Get-CimInstance -Namespace 'root\wmi' -ClassName 'MSStorageDriver_FailurePredictStatus' -ErrorAction Stop)
+        if ($prev.Count -gt 0) {
+            $algumaPrevisao = [bool](@($prev | Where-Object { $_.PredictFailure }).Count -gt 0)
+        }
+    } catch { }
+
+    foreach ($d in $discos) {
+        # Os contadores detalhados (temperatura, desgaste, horas) exigem elevação:
+        # sem ela o CIM nega o acesso e os campos ficam nulos.
+        $c = $null
+        try { $c = Get-StorageReliabilityCounter -PhysicalDisk $d -ErrorAction Stop } catch { }
+        # Sem elevação o CIM nega o acesso; não dependemos do texto do erro, que é traduzido.
+        $semPermissao = ($null -eq $c -and -not $elevado)
+
+        $tipo = [string]$d.MediaType
+        if ([string]::IsNullOrWhiteSpace($tipo) -or $tipo -eq 'Unspecified') {
+            $tipo = if ($d.SpindleSpeed -eq 0) { 'SSD' } else { 'Desconhecido' }
+        }
+
+        $lista.Add([pscustomobject]@{
+            Nome          = [string]$d.FriendlyName
+            Tipo          = $tipo
+            TamanhoGB     = if ($d.Size) { [math]::Round($d.Size / 1GB, 1) } else { 0 }
+            Saude         = [string]$d.HealthStatus
+            Operacional   = [string]$d.OperationalStatus
+            TemperaturaC  = if ($c -and $c.Temperature -gt 0) { [int]$c.Temperature } else { $null }
+            DesgastePct   = if ($c -and $null -ne $c.Wear) { [int]$c.Wear } else { $null }
+            HorasLigado   = if ($c -and $c.PowerOnHours -gt 0) { [int]$c.PowerOnHours } else { $null }
+            ErrosLeitura  = if ($c) { $c.ReadErrorsTotal } else { $null }
+            ErrosEscrita  = if ($c) { $c.WriteErrorsTotal } else { $null }
+            PrevisaoFalha = $algumaPrevisao
+            SemPermissao  = $semPermissao
+        })
+    }
+    return $lista.ToArray()
+}
+
+function Get-GwtBatteryHealth {
+    $bats = @()
+    try { $bats = @(Get-CimInstance Win32_Battery -ErrorAction Stop) } catch { }
+    if ($bats.Count -eq 0) { return $null }   # desktop: sem bateria
+
+    $resultado = [pscustomobject]@{
+        Fabricante = ''; Quimica = ''
+        CapacidadeProjetoMwh = $null; CapacidadeAtualMwh = $null
+        SaudePct = $null; Ciclos = $null; CargaAtualPct = $null
+    }
+    try { $resultado.CargaAtualPct = [int]$bats[0].EstimatedChargeRemaining } catch { }
+
+    $xml = Join-Path $env:TEMP ("gwt-bateria-{0}.xml" -f [guid]::NewGuid().ToString('N').Substring(0, 8))
+    try {
+        & powercfg /batteryreport /xml /output $xml 2>&1 | Out-Null
+        if (Test-Path -LiteralPath $xml) {
+            $doc = New-Object System.Xml.XmlDocument
+            $doc.Load($xml)
+            $b = $doc.BatteryReport.Batteries.Battery
+            if ($b -is [array]) { $b = $b[0] }
+            if ($b) {
+                $resultado.Fabricante = [string]$b.Manufacturer
+                $resultado.Quimica = [string]$b.Chemistry
+                $proj = 0; $cheia = 0
+                if ([double]::TryParse([string]$b.DesignCapacity, [ref]$proj)) { $resultado.CapacidadeProjetoMwh = [int]$proj }
+                if ([double]::TryParse([string]$b.FullChargeCapacity, [ref]$cheia)) { $resultado.CapacidadeAtualMwh = [int]$cheia }
+                if ($proj -gt 0 -and $cheia -gt 0) { $resultado.SaudePct = [math]::Round(($cheia / $proj) * 100, 1) }
+                $ciclos = 0
+                if ([double]::TryParse([string]$b.CycleCount, [ref]$ciclos) -and $ciclos -gt 0) { $resultado.Ciclos = [int]$ciclos }
+            }
+        }
+    }
+    catch { }
+    finally { Remove-Item -LiteralPath $xml -Force -ErrorAction SilentlyContinue }
+
+    return $resultado
+}
+
+function Get-GwtWin11Readiness {
+    $itens = New-Object System.Collections.Generic.List[object]
+    function Add-Item([string]$n, [object]$ok, [string]$det, [string]$acao) {
+        $itens.Add([pscustomobject]@{ Item = $n; Ok = $ok; Detalhe = $det; Acao = $acao })
+    }
+
+    # Processador: 2+ núcleos, 1 GHz+, 64 bits
+    try {
+        $cpu = @(Get-CimInstance Win32_Processor -ErrorAction Stop)[0]
+        $nucleos = [int]$cpu.NumberOfCores
+        $mhz = [int]$cpu.MaxClockSpeed
+        $x64 = ($cpu.AddressWidth -eq 64)
+        $ok = ($nucleos -ge 2 -and $mhz -ge 1000 -and $x64)
+        Add-Item 'Processador' $ok ("{0} — {1} núcleos, {2} MHz, {3} bits" -f $cpu.Name.Trim(), $nucleos, $mhz, $cpu.AddressWidth) `
+                 'Exige 2 núcleos, 1 GHz e 64 bits. A Microsoft também mantém uma lista de modelos aprovados.'
+    } catch { Add-Item 'Processador' $null 'Não foi possível ler' '' }
+
+    # Memória: 4 GB+
+    try {
+        $gb = [math]::Round((Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory / 1GB, 1)
+        Add-Item 'Memória RAM' ($gb -ge 3.8) ("{0} GB" -f $gb) 'Exige 4 GB. Instale mais memória.'
+    } catch { Add-Item 'Memória RAM' $null 'Não foi possível ler' '' }
+
+    # Disco do sistema: 64 GB+
+    try {
+        $sys = $env:SystemDrive
+        $vol = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$sys'" -ErrorAction Stop
+        $gb = [math]::Round($vol.Size / 1GB, 1)
+        Add-Item 'Armazenamento' ($gb -ge 64) ("Disco {0} com {1} GB" -f $sys, $gb) 'Exige 64 GB no disco do sistema.'
+    } catch { Add-Item 'Armazenamento' $null 'Não foi possível ler' '' }
+
+    # Firmware: a variável firmware_type do Windows é a fonte mais direta; a chave
+    # SecureBoot\State e as partições GPT servem de confirmação.
+    $uefi = $null
+    $comoSoube = ''
+    if ($env:firmware_type -match 'UEFI') { $uefi = $true; $comoSoube = 'UEFI' }
+    elseif ($env:firmware_type -match 'Legacy|BIOS') { $uefi = $false; $comoSoube = 'BIOS legado (CSM)' }
+    elseif (Test-Path 'HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\State') { $uefi = $true; $comoSoube = 'UEFI' }
+    else {
+        try {
+            $gpt = @(Get-CimInstance Win32_DiskPartition -ErrorAction Stop | Where-Object { $_.Type -match 'GPT' }).Count
+            if ($gpt -gt 0) { $uefi = $true; $comoSoube = 'UEFI (disco em GPT)' }
+            else { $uefi = $false; $comoSoube = 'BIOS legado (disco em MBR)' }
+        } catch { $comoSoube = 'Não foi possível determinar' }
+    }
+    Add-Item 'Firmware UEFI' $uefi $comoSoube `
+             'O Windows 11 exige UEFI. Converter exige passar o disco para GPT (mbr2gpt) e trocar o modo na BIOS.'
+
+    # Inicialização Segura: lê o estado pelo registro, que funciona sem elevação.
+    # O Confirm-SecureBootUEFI exige privilégio e lança "Acesso negado" sem ele —
+    # tratar isso como "BIOS legado" daria um falso negativo.
+    $sbChave = 'HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\State'
+    if (Test-Path $sbChave) {
+        $valor = $null
+        try { $valor = (Get-ItemProperty $sbChave -Name 'UEFISecureBootEnabled' -ErrorAction Stop).UEFISecureBootEnabled } catch { }
+        if ($null -ne $valor) {
+            $ativo = ([int]$valor -eq 1)
+            Add-Item 'Inicialização Segura' $ativo $(if ($ativo) { 'Ativada' } else { 'Desativada' }) `
+                     'Ative a Inicialização Segura (Secure Boot) na BIOS/UEFI.'
+        }
+        else {
+            # A chave existe (logo, é UEFI), mas não deu para ler o valor
+            $leu = $null
+            try { $leu = [bool](Confirm-SecureBootUEFI -ErrorAction Stop) } catch { }
+            if ($null -ne $leu) {
+                Add-Item 'Inicialização Segura' $leu $(if ($leu) { 'Ativada' } else { 'Desativada' }) `
+                         'Ative a Inicialização Segura (Secure Boot) na BIOS/UEFI.'
+            }
+            else {
+                Add-Item 'Inicialização Segura' $null 'Não foi possível ler (execute como Administrador)' `
+                         'Abra o toolkit como Administrador para conferir este item.'
+            }
+        }
+    }
+    elseif ($uefi -eq $false) {
+        Add-Item 'Inicialização Segura' $false 'Indisponível (máquina em BIOS legado)' `
+                 'Só existe em UEFI. Converta o firmware para UEFI primeiro.'
+    }
+    else {
+        Add-Item 'Inicialização Segura' $null 'Não foi possível ler' 'Confira na BIOS/UEFI.'
+    }
+
+    # TPM 2.0
+    try {
+        $tpm = Get-CimInstance -Namespace 'root\cimv2\security\microsofttpm' -ClassName Win32_Tpm -ErrorAction Stop
+        if ($tpm) {
+            $versao = ([string]$tpm.SpecVersion -split ',')[0].Trim()
+            $ok = ($tpm.IsEnabled_InitialValue -and $versao -match '^2')
+            Add-Item 'TPM 2.0' $ok ("Versão {0}, {1}" -f $versao, $(if ($tpm.IsEnabled_InitialValue) { 'ativado' } else { 'desativado' })) `
+                     'Ative o TPM (pode aparecer como PTT na Intel ou fTPM na AMD) na BIOS/UEFI.'
+        }
+        else { Add-Item 'TPM 2.0' $false 'Não encontrado' 'Ative o TPM/PTT/fTPM na BIOS/UEFI.' }
+    }
+    catch { Add-Item 'TPM 2.0' $false 'Não encontrado' 'Ative o TPM (PTT na Intel, fTPM na AMD) na BIOS/UEFI.' }
+
+    # Placa de vídeo (informativo: DirectX 12 / WDDM 2.0 não é legível de forma confiável por WMI)
+    try {
+        $gpu = @(Get-CimInstance Win32_VideoController -ErrorAction Stop)[0]
+        Add-Item 'Placa de vídeo' $null ("{0} (driver {1})" -f $gpu.Name, $gpu.DriverVersion) `
+                 'O Windows 11 exige DirectX 12 com WDDM 2.0 — confira com o comando dxdiag.'
+    } catch { }
+
+    return $itens.ToArray()
+}
+
+function Get-GwtProblemDevices {
+    $codigos = @{
+        1 = 'Configuração incorreta'; 3 = 'Driver corrompido ou sem memória'
+        10 = 'Não pode iniciar'; 12 = 'Sem recursos livres suficientes'
+        14 = 'Precisa reiniciar o computador'; 18 = 'Reinstale os drivers'
+        19 = 'Registro corrompido'; 21 = 'O Windows está removendo o dispositivo'
+        22 = 'Dispositivo desativado'; 24 = 'Ausente ou com driver incompleto'
+        28 = 'Sem driver instalado'; 31 = 'Driver não carregou'
+        37 = 'O driver falhou ao inicializar'; 39 = 'Driver corrompido ou ausente'
+        43 = 'Parado por relatar problemas'; 45 = 'Não está conectado'
+    }
+    $lista = New-Object System.Collections.Generic.List[object]
+    try {
+        $devs = @(Get-CimInstance Win32_PnPEntity -ErrorAction Stop |
+                  Where-Object { $_.ConfigManagerErrorCode -and $_.ConfigManagerErrorCode -ne 0 -and $_.ConfigManagerErrorCode -ne 45 })
+        foreach ($d in $devs) {
+            $cod = [int]$d.ConfigManagerErrorCode
+            $hw = ''
+            try { if ($d.HardwareID) { $hw = @($d.HardwareID)[0] } } catch { }
+            $lista.Add([pscustomobject]@{
+                Nome    = [string]$d.Name
+                Codigo  = $cod
+                Motivo  = if ($codigos.ContainsKey($cod)) { $codigos[$cod] } else { "Código $cod" }
+                Classe  = [string]$d.PNPClass
+                HardwareID = $hw
+            })
+        }
+    } catch { }
+    return $lista.ToArray()
+}
+
+function Invoke-GwtHardwareScanWorker {
+    param([object]$Config)
+
+    try {
+        $sync.Busy = $true
+        $sync.CancelRequested = $false
+        $sync.ProgressValue = [double]0
+        Add-GwtLog '================ SAÚDE DO HARDWARE ================'
+
+        $sb = New-Object System.Text.StringBuilder
+        $linha = { param($t) [void]$sb.AppendLine($t) }
+        & $linha ("SAÚDE DO HARDWARE — {0} — {1}" -f $env:COMPUTERNAME, (Get-Date).ToString('dd/MM/yyyy HH:mm'))
+        & $linha ('=' * 78)
+
+        # --- Discos ---
+        $sync.StatusText = 'Lendo a saúde dos discos...'
+        $sync.ProgressValue = [double]15
+        Add-GwtLog 'Lendo os dados de S.M.A.R.T. dos discos...'
+        & $linha ''
+        & $linha '>> DISCOS (S.M.A.R.T.)'
+        $discos = @(Get-GwtDiskHealth)
+        if ($discos.Count -eq 0) { & $linha '   Nenhum disco físico encontrado.' }
+        foreach ($d in $discos) {
+            & $linha ("   {0}  [{1}]  {2} GB" -f $d.Nome, $d.Tipo, $d.TamanhoGB)
+            $estado = "      Estado: $($d.Saude)"
+            if ($d.Operacional) { $estado += " / $($d.Operacional)" }
+            & $linha $estado
+            if ($d.SemPermissao) {
+                & $linha '      (temperatura, desgaste e horas de uso exigem executar como Administrador)'
+            }
+            else {
+                $det = New-Object System.Collections.Generic.List[string]
+                if ($null -ne $d.TemperaturaC) { $det.Add("temperatura $($d.TemperaturaC) °C") }
+                if ($null -ne $d.DesgastePct)  { $det.Add("desgaste $($d.DesgastePct)%") }
+                if ($null -ne $d.HorasLigado)  { $det.Add("$($d.HorasLigado) h ligado") }
+                if ($det.Count -gt 0) { & $linha ("      " + ($det.ToArray() -join ' | ')) }
+                if ($d.ErrosLeitura -or $d.ErrosEscrita) {
+                    & $linha ("      Erros: {0} de leitura, {1} de escrita" -f $d.ErrosLeitura, $d.ErrosEscrita)
+                }
+            }
+            if ($d.Saude -and $d.Saude -ne 'Healthy') {
+                & $linha '      *** ATENÇÃO: o disco não está saudável. Faça backup dos dados. ***'
+                Add-GwtLog "Disco '$($d.Nome)' com estado '$($d.Saude)' — recomende backup." 'Warn'
+            }
+            if ($d.PrevisaoFalha -eq $true) {
+                & $linha '      *** ALERTA S.M.A.R.T.: o disco prevê falha. Troque o quanto antes. ***'
+                Add-GwtLog "ALERTA: o S.M.A.R.T. prevê falha em '$($d.Nome)'." 'Error'
+            }
+            if ($null -ne $d.DesgastePct -and $d.DesgastePct -ge 80) {
+                & $linha ("      *** Desgaste alto ({0}%): o SSD está perto do fim da vida útil. ***" -f $d.DesgastePct)
+            }
+        }
+
+        # --- Bateria ---
+        if (Test-GwtCancel) { return }
+        $sync.StatusText = 'Lendo a bateria...'
+        $sync.ProgressValue = [double]45
+        & $linha ''
+        & $linha '>> BATERIA'
+        $bat = Get-GwtBatteryHealth
+        if ($null -eq $bat) { & $linha '   Sem bateria (computador de mesa).' }
+        else {
+            if ($bat.Fabricante) { & $linha ("   Fabricante: {0}  {1}" -f $bat.Fabricante, $bat.Quimica) }
+            if ($null -ne $bat.CargaAtualPct) { & $linha ("   Carga agora: {0}%" -f $bat.CargaAtualPct) }
+            if ($bat.CapacidadeProjetoMwh -and $bat.CapacidadeAtualMwh) {
+                & $linha ("   Capacidade: {0} mWh de fábrica, {1} mWh hoje" -f $bat.CapacidadeProjetoMwh, $bat.CapacidadeAtualMwh)
+            }
+            if ($null -ne $bat.SaudePct) {
+                & $linha ("   Saúde: {0}% da capacidade original" -f $bat.SaudePct)
+                if ($bat.SaudePct -lt 60) { & $linha '      *** Bateria bem gasta: vale orçar a troca. ***' }
+                elseif ($bat.SaudePct -lt 80) { & $linha '      Desgaste perceptível (abaixo de 80%).' }
+            }
+            if ($null -ne $bat.Ciclos) { & $linha ("   Ciclos de carga: {0}" -f $bat.Ciclos) }
+            if ($null -eq $bat.SaudePct) { & $linha '   (o relatório do Windows não trouxe as capacidades desta bateria)' }
+        }
+
+        # --- Windows 11 ---
+        if (Test-GwtCancel) { return }
+        $sync.StatusText = 'Conferindo os requisitos do Windows 11...'
+        $sync.ProgressValue = [double]70
+        & $linha ''
+        & $linha '>> REQUISITOS DO WINDOWS 11'
+        $itens = @(Get-GwtWin11Readiness)
+        $reprovados = 0
+        foreach ($i in $itens) {
+            $marca = if ($null -eq $i.Ok) { '[-]' } elseif ($i.Ok) { '[OK]' } else { '[X]'; }
+            if ($i.Ok -eq $false) { $reprovados++ }
+            & $linha ("   {0} {1}: {2}" -f $marca, $i.Item, $i.Detalhe)
+            if ($i.Ok -eq $false -and $i.Acao) { & $linha ("        -> {0}" -f $i.Acao) }
+        }
+        if ($reprovados -eq 0) { & $linha '   Resultado: a máquina atende aos requisitos verificáveis.' }
+        else { & $linha ("   Resultado: {0} item(ns) reprovado(s) — veja as orientações acima." -f $reprovados) }
+
+        # --- Dispositivos ---
+        if (Test-GwtCancel) { return }
+        $sync.StatusText = 'Procurando dispositivos sem driver...'
+        $sync.ProgressValue = [double]90
+        & $linha ''
+        & $linha '>> DISPOSITIVOS COM PROBLEMA'
+        $devs = @(Get-GwtProblemDevices)
+        if ($devs.Count -eq 0) { & $linha '   Nenhum dispositivo com problema — todos os drivers estão instalados.' }
+        else {
+            foreach ($d in $devs) {
+                & $linha ("   {0}" -f $d.Nome)
+                & $linha ("      {0} (código {1})" -f $d.Motivo, $d.Codigo)
+                if ($d.HardwareID) { & $linha ("      ID: {0}" -f $d.HardwareID) }
+            }
+            & $linha ''
+            & $linha '   Dica: pesquise o ID do hardware para achar o driver certo.'
+            Add-GwtLog "$($devs.Count) dispositivo(s) com problema de driver." 'Warn'
+        }
+
+        $texto = $sb.ToString()
+        $sync.HardwareReport = $texto
+        Request-GwtUi @{ Action = 'HardwareReady' }
+
+        $sync.ProgressValue = [double]100
+        Add-GwtLog 'Verificação de hardware concluída.' 'Success'
+        Add-GwtAction -Categoria 'Hardware' -Item 'Verificação de saúde' -Resultado 'OK' `
+                      -Detalhe ("{0} disco(s), {1} dispositivo(s) com problema" -f $discos.Count, $devs.Count)
+    }
+    catch {
+        Add-GwtLog "Erro na verificação de hardware: $($_.Exception.Message)" 'Error'
+    }
+    finally {
+        $sync.Busy = $false
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
+# ----------------------------------------------------------------------------
+# Backup pré-formatação: guarda drivers e redes Wi-Fi num pendrive e devolve
+# depois de formatar. Pensado para bancada: o backup fica junto do instalador.
+# ----------------------------------------------------------------------------
+
+function Get-GwtBackupManifest {
+    param([string]$Pasta)
+    $arq = Join-Path $Pasta 'backup-info.json'
+    if (-not (Test-Path -LiteralPath $arq)) { return $null }
+    try { return (Get-Content -LiteralPath $arq -Raw -Encoding UTF8 | ConvertFrom-Json) } catch { return $null }
+}
+
+function Invoke-GwtPreFormatBackupWorker {
+    param([object]$Config)
+
+    $destino = [string]$Config.Destino
+    $comDrivers = [bool]$Config.Drivers
+    $comWifi = [bool]$Config.Wifi
+    $comProgramas = [bool]$Config.Programas
+
+    try {
+        $sync.Busy = $true
+        $sync.CancelRequested = $false
+        $sync.ProgressValue = [double]0
+        Add-GwtLog '================ BACKUP PRÉ-FORMATAÇÃO ================'
+
+        if ([string]::IsNullOrWhiteSpace($destino)) { throw 'Escolha a pasta de destino (por exemplo, a raiz do pendrive).' }
+        $pasta = Join-Path $destino ('GeniusBackup-' + $env:COMPUTERNAME)
+        New-Item -ItemType Directory -Path $pasta -Force | Out-Null
+        Add-GwtLog "Destino: $pasta"
+
+        $resumo = [ordered]@{
+            Computador = $env:COMPUTERNAME
+            Windows    = (Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption
+            DataHora   = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+            Drivers    = 0
+            RedesWifi  = 0
+            Programas  = 0
+        }
+
+        # --- Drivers de terceiros (os do próprio Windows não precisam) ---
+        if ($comDrivers) {
+            if (Test-GwtCancel) { return }
+            $sync.StatusText = 'Exportando drivers...'
+            $sync.ProgressValue = [double]10
+            Add-GwtLog 'Exportando drivers de terceiros (pode levar alguns minutos)...'
+            $pastaDrv = Join-Path $pasta 'Drivers'
+            New-Item -ItemType Directory -Path $pastaDrv -Force | Out-Null
+            try {
+                $exp = @(Export-WindowsDriver -Online -Destination $pastaDrv -ErrorAction Stop)
+                $resumo.Drivers = $exp.Count
+                Add-GwtLog "$($exp.Count) driver(s) exportado(s)." 'Success'
+                Add-GwtAction -Categoria 'Backup pré-formatação' -Item 'Drivers' -Resultado 'OK' -Detalhe "$($exp.Count) pacote(s)"
+            }
+            catch {
+                Add-GwtLog "Falha ao exportar drivers: $($_.Exception.Message)" 'Error'
+                Add-GwtAction -Categoria 'Backup pré-formatação' -Item 'Drivers' -Resultado 'Falha' -Detalhe $_.Exception.Message
+            }
+        }
+
+        # --- Redes Wi-Fi com as senhas ---
+        if ($comWifi) {
+            if (Test-GwtCancel) { return }
+            $sync.StatusText = 'Exportando redes Wi-Fi...'
+            $sync.ProgressValue = [double]55
+            Add-GwtLog 'Exportando perfis de Wi-Fi (as senhas vão em texto legível)...'
+            $pastaWifi = Join-Path $pasta 'RedesWiFi'
+            New-Item -ItemType Directory -Path $pastaWifi -Force | Out-Null
+            try {
+                & netsh wlan export profile key=clear folder="$pastaWifi" 2>&1 | ForEach-Object {
+                    $l = ([string]$_).Trim()
+                    if ($l -match 'interface|perfil|profile') { Add-GwtLog "    $l" }
+                }
+                $perfis = @(Get-ChildItem -LiteralPath $pastaWifi -Filter '*.xml' -ErrorAction SilentlyContinue)
+                $resumo.RedesWifi = $perfis.Count
+                if ($perfis.Count -gt 0) {
+                    Add-GwtLog "$($perfis.Count) rede(s) Wi-Fi salva(s)." 'Success'
+                    Add-GwtLog 'ATENÇÃO: as senhas ficam legíveis nesses arquivos. Guarde o pendrive com cuidado.' 'Warn'
+                }
+                else { Add-GwtLog 'Nenhum perfil de Wi-Fi encontrado (máquina sem Wi-Fi ou sem redes salvas).' 'Warn' }
+                Add-GwtAction -Categoria 'Backup pré-formatação' -Item 'Redes Wi-Fi' -Resultado 'OK' -Detalhe "$($perfis.Count) rede(s)"
+            }
+            catch {
+                Add-GwtLog "Falha ao exportar o Wi-Fi: $($_.Exception.Message)" 'Error'
+            }
+        }
+
+        # --- Lista dos programas instalados (para reinstalar depois) ---
+        if ($comProgramas) {
+            if (Test-GwtCancel) { return }
+            $sync.StatusText = 'Listando programas instalados...'
+            $sync.ProgressValue = [double]80
+            Add-GwtLog 'Salvando a lista de programas instalados...'
+            try {
+                $saida = Join-Path $pasta 'programas-instalados.txt'
+                $linhas = New-Object System.Collections.Generic.List[string]
+                $linhas.Add("Programas instalados em $env:COMPUTERNAME — $((Get-Date).ToString('dd/MM/yyyy HH:mm'))")
+                $linhas.Add(('=' * 70))
+
+                $chaves = @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+                            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')
+                $apps = @(Get-ItemProperty $chaves -ErrorAction SilentlyContinue |
+                          Where-Object { $_.DisplayName -and -not $_.SystemComponent } |
+                          Sort-Object DisplayName -Unique)
+                foreach ($a in $apps) {
+                    $linhas.Add(("{0}  [{1}]" -f $a.DisplayName, $(if ($a.DisplayVersion) { $a.DisplayVersion } else { 's/ versão' })))
+                }
+                $resumo.Programas = $apps.Count
+
+                # IDs do winget facilitam reinstalar em lote depois
+                $linhas.Add('')
+                $linhas.Add('--- Pacotes conhecidos pelo winget (para reinstalar) ---')
+                try {
+                    $wg = & winget list --accept-source-agreements 2>&1 | Out-String
+                    $linhas.Add($wg.Trim())
+                } catch { $linhas.Add('(winget indisponível nesta máquina)') }
+
+                Set-Content -LiteralPath $saida -Value $linhas.ToArray() -Encoding UTF8
+                Add-GwtLog "$($apps.Count) programa(s) listado(s)." 'Success'
+                Add-GwtAction -Categoria 'Backup pré-formatação' -Item 'Lista de programas' -Resultado 'OK' -Detalhe "$($apps.Count) itens"
+            }
+            catch { Add-GwtLog "Falha ao listar programas: $($_.Exception.Message)" 'Warn' }
+        }
+
+        # Pastas vazias (etapa desmarcada ou que falhou) só confundiriam na restauração
+        foreach ($sub in 'Drivers', 'RedesWiFi') {
+            $p = Join-Path $pasta $sub
+            if ((Test-Path -LiteralPath $p) -and @(Get-ChildItem -LiteralPath $p -Recurse -File -ErrorAction SilentlyContinue).Count -eq 0) {
+                Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue
+                Add-GwtLog "A pasta '$sub' ficou vazia e foi removida do backup." 'Warn'
+            }
+        }
+
+        $resumo | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $pasta 'backup-info.json') -Encoding UTF8
+        $sync.ProgressValue = [double]100
+        Add-GwtLog "Backup concluído em: $pasta" 'Success'
+        Add-GwtLog ("Resumo: {0} driver(s), {1} rede(s) Wi-Fi, {2} programa(s) listado(s)." -f $resumo.Drivers, $resumo.RedesWifi, $resumo.Programas) 'Success'
+        Request-GwtUi @{ Action = 'Message'; Title = 'Backup pronto'; Kind = 'Info'
+                         Text = "Backup salvo em:`n$pasta`n`nDrivers: $($resumo.Drivers)`nRedes Wi-Fi: $($resumo.RedesWifi)`nProgramas listados: $($resumo.Programas)" +
+                                $(if ($resumo.RedesWifi -gt 0) { "`n`nAs senhas do Wi-Fi ficam legíveis nos arquivos. Guarde o pendrive com cuidado." } else { '' }) }
+    }
+    catch {
+        Add-GwtLog "Erro no backup: $($_.Exception.Message)" 'Error'
+    }
+    finally {
+        $sync.Busy = $false
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
+function Invoke-GwtPreFormatRestoreWorker {
+    param([object]$Config)
+
+    $pasta = [string]$Config.Pasta
+    try {
+        $sync.Busy = $true
+        $sync.CancelRequested = $false
+        $sync.ProgressValue = [double]0
+        Add-GwtLog '================ RESTAURAR BACKUP ================'
+
+        if (-not (Test-Path -LiteralPath $pasta)) { throw "Pasta não encontrada: $pasta" }
+        $info = Get-GwtBackupManifest -Pasta $pasta
+        if ($info) { Add-GwtLog "Backup de '$($info.Computador)' feito em $($info.DataHora)." }
+
+        # --- Drivers ---
+        $pastaDrv = Join-Path $pasta 'Drivers'
+        $temInf = (Test-Path -LiteralPath $pastaDrv) -and
+                  @(Get-ChildItem -LiteralPath $pastaDrv -Filter '*.inf' -Recurse -File -ErrorAction SilentlyContinue).Count -gt 0
+        if ($temInf) {
+            if (Test-GwtCancel) { return }
+            $sync.StatusText = 'Instalando drivers do backup...'
+            $sync.ProgressValue = [double]15
+            Add-GwtLog 'Instalando os drivers do backup (pode levar alguns minutos)...'
+            $saida = & pnputil /add-driver (Join-Path $pastaDrv '*.inf') /subdirs /install 2>&1 | Out-String
+            $adicionados = @([regex]::Matches($saida, '(?im)^\s*(Pacote de driver adicionado|Driver package added)')).Count
+            Add-GwtLog "Drivers processados: $adicionados pacote(s) adicionado(s)." 'Success'
+            Add-GwtAction -Categoria 'Restaurar backup' -Item 'Drivers' -Resultado 'OK' -Detalhe "$adicionados pacote(s)"
+        }
+        else { Add-GwtLog 'O backup não tem drivers (.inf) — etapa ignorada.' 'Warn' }
+
+        # --- Redes Wi-Fi ---
+        $pastaWifi = Join-Path $pasta 'RedesWiFi'
+        $perfis = @()
+        if (Test-Path -LiteralPath $pastaWifi) {
+            $perfis = @(Get-ChildItem -LiteralPath $pastaWifi -Filter '*.xml' -ErrorAction SilentlyContinue)
+        }
+        if ($perfis.Count -gt 0) {
+            if (Test-GwtCancel) { return }
+            $sync.StatusText = 'Restaurando redes Wi-Fi...'
+            $sync.ProgressValue = [double]70
+            $okWifi = 0
+            foreach ($p in $perfis) {
+                $r = & netsh wlan add profile filename="$($p.FullName)" user=all 2>&1 | Out-String
+                if ($r -match 'adicionado|added|com êxito|successfully') { $okWifi++ }
+                else { Add-GwtLog "    Não foi possível adicionar '$($p.BaseName)': $($r.Trim())" 'Warn' }
+            }
+            Add-GwtLog "$okWifi de $($perfis.Count) rede(s) Wi-Fi restaurada(s)." 'Success'
+            Add-GwtAction -Categoria 'Restaurar backup' -Item 'Redes Wi-Fi' -Resultado 'OK' -Detalhe "$okWifi rede(s)"
+        }
+        else { Add-GwtLog 'O backup não tem perfis de Wi-Fi — etapa ignorada.' 'Warn' }
+
+        $sync.ProgressValue = [double]100
+        Add-GwtLog 'Restauração concluída.' 'Success'
+        Request-GwtUi @{ Action = 'Message'; Title = 'Restauração concluída'; Kind = 'Info'
+                         Text = "Drivers e redes Wi-Fi do backup foram aplicados.`n`nAlguns drivers só entram em uso após reiniciar." }
+    }
+    catch {
+        Add-GwtLog "Erro ao restaurar: $($_.Exception.Message)" 'Error'
+    }
+    finally {
+        $sync.Busy = $false
+        $sync.StatusText = 'Pronto.'
+    }
+}
+
 #endregion
 
 # ============================================================================
-#region Infraestrutura de runspaces (padrão WinUtil)
+#region Infraestrutura de runspaces
 # ============================================================================
 
 function Initialize-GwtRunspacePool {
@@ -4247,6 +4841,65 @@ function Invoke-GwtRunspace {
                                         <Button Name="MonitorUninstallButton" Style="{StaticResource GhostButton}" Content="🗑️  Desinstalar" Margin="0,0,14,8"/>
                                         <CheckBox Name="MonitorPresetCheck" Content="Incluir no preset" VerticalAlignment="Center" Margin="0,0,0,8"
                                                   ToolTip="Se marcado, o preset exportado lembra de instalar o monitor com este intervalo."/>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </TabItem>
+
+                    <TabItem Header="🖥️  Meu PC">
+                        <Grid Margin="0,4,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Style="{StaticResource Card}" Padding="14" Margin="0,0,0,12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Saúde do hardware" FontSize="18" FontWeight="Bold"/>
+                                        <TextBlock Text="Discos pelo S.M.A.R.T. (temperatura, desgaste, previsão de falha), bateria com ciclos e capacidade, requisitos do Windows 11 e dispositivos sem driver. Somente leitura: nada é alterado." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,12,0"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+                                        <Button Name="HardwareScanButton" Style="{StaticResource GoldButton}" Content="🔍  Verificar"/>
+                                        <Button Name="HardwareSaveButton" Style="{StaticResource GhostButton}" Content="💾  Salvar laudo" Margin="0"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Row="1" Style="{StaticResource Card}" Padding="8">
+                                <TextBox Name="HardwareText" Style="{StaticResource Console}"/>
+                            </Border>
+
+                            <Border Grid.Row="2" Style="{StaticResource Card}" Padding="14" Margin="0,12,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="💾  Backup antes de formatar" FontSize="18" FontWeight="Bold"/>
+                                    <TextBlock Text="Salva os drivers desta máquina e as redes Wi-Fi (com as senhas) numa pasta do pendrive. Depois de formatar, abra o toolkit do mesmo pendrive e clique em Restaurar para devolver tudo." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,10"/>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Pasta:" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBox Grid.Column="1" Name="BackupPathBox" VerticalContentAlignment="Center"
+                                                 ToolTip="Raiz do pendrive, por exemplo E:\ — o toolkit cria a subpasta GeniusBackup-NOMEDOPC"/>
+                                        <Button Grid.Column="2" Name="BackupBrowseButton" Style="{StaticResource GhostButton}" Content="📂  Escolher" Margin="8,0,0,0"/>
+                                    </Grid>
+                                    <WrapPanel>
+                                        <CheckBox Name="BackupDriversCheck" Content="Drivers" IsChecked="True" VerticalAlignment="Center" Margin="0,0,12,8"
+                                                  ToolTip="Exporta os drivers de terceiros instalados (os do próprio Windows não precisam)."/>
+                                        <CheckBox Name="BackupWifiCheck" Content="Redes Wi-Fi (com senhas)" IsChecked="True" VerticalAlignment="Center" Margin="0,0,12,8"
+                                                  ToolTip="As senhas ficam legíveis nos arquivos XML. Guarde o pendrive com cuidado."/>
+                                        <CheckBox Name="BackupProgramsCheck" Content="Lista de programas" IsChecked="True" VerticalAlignment="Center" Margin="0,0,16,8"
+                                                  ToolTip="Salva um .txt com os programas instalados, para reinstalar depois."/>
+                                        <Button Name="BackupRunButton" Style="{StaticResource GoldButton}" Content="💾  Fazer backup" Margin="0,0,8,8"/>
+                                        <Button Name="BackupRestoreButton" Style="{StaticResource GhostButton}" Content="♻️  Restaurar backup" Margin="0,0,0,8"/>
                                     </WrapPanel>
                                 </StackPanel>
                             </Border>
@@ -5333,6 +5986,99 @@ $sync.Controls['DiagRunButton'].Add_Click({
     Invoke-GwtRunspace -ScriptBlock { Invoke-GwtDiagnosticWorker }
 })
 
+# ---- Meu PC: saúde do hardware e backup pré-formatação ----
+$sync.Controls['HardwareScanButton'].Add_Click({
+    if ($sync.Busy) { return }
+    if (-not (Test-GwtAdmin)) {
+        Add-GwtLog 'Sem Administrador: temperatura, desgaste e horas de uso dos discos não podem ser lidos.' 'Warn'
+    }
+    $sync.Controls['HardwareText'].Text = 'Verificando o hardware, aguarde...'
+    Invoke-GwtRunspace -ScriptBlock { Invoke-GwtHardwareScanWorker }
+})
+
+$sync.Controls['HardwareSaveButton'].Add_Click({
+    $texto = [string]$sync.Controls['HardwareText'].Text
+    if ([string]::IsNullOrWhiteSpace($texto) -or $texto -match '^Verificando') {
+        [System.Windows.MessageBox]::Show($Window, 'Clique em Verificar primeiro.', 'Nada para salvar', 'OK', 'Information') | Out-Null
+        return
+    }
+    try {
+        $pasta = Join-Path $sync.AppRoot 'relatorios'
+        New-Item -ItemType Directory -Path $pasta -Force | Out-Null
+        $arq = Join-Path $pasta ("hardware-{0}-{1}.txt" -f $env:COMPUTERNAME, (Get-Date).ToString('yyyyMMdd-HHmmss'))
+        Set-Content -LiteralPath $arq -Value $texto -Encoding UTF8
+        Add-GwtLog "Laudo salvo em: $arq" 'Success'
+        Start-Process notepad.exe -ArgumentList "`"$arq`""
+    }
+    catch { Add-GwtLog "Falha ao salvar o laudo: $($_.Exception.Message)" 'Error' }
+})
+
+$sync.Controls['BackupBrowseButton'].Add_Click({
+    Select-GwtFolderInto -BoxName 'BackupPathBox' -Titulo 'Escolha onde salvar o backup (por exemplo, a raiz do pendrive)'
+})
+
+$sync.Controls['BackupRunButton'].Add_Click({
+    if ($sync.Busy) { return }
+    $destino = ([string]$sync.Controls['BackupPathBox'].Text).Trim()
+    if ([string]::IsNullOrWhiteSpace($destino) -or -not (Test-Path -LiteralPath $destino)) {
+        [System.Windows.MessageBox]::Show($Window, 'Escolha uma pasta de destino que exista (a raiz do pendrive, por exemplo).', 'Pasta inválida', 'OK', 'Warning') | Out-Null
+        return
+    }
+    if (-not (Test-GwtAdmin)) {
+        [System.Windows.MessageBox]::Show($Window, 'Exportar drivers exige Administrador. Reabra o toolkit como Administrador.', 'Administrador necessário', 'OK', 'Warning') | Out-Null
+        return
+    }
+    $comWifi = [bool]$sync.Controls['BackupWifiCheck'].IsChecked
+    if ($comWifi) {
+        $aviso = "O backup das redes Wi-Fi guarda as SENHAS EM TEXTO LEGÍVEL nos arquivos.`n`n" +
+                 "Guarde o pendrive com cuidado e apague a pasta do backup depois de usar.`n`nContinuar?"
+        if ([System.Windows.MessageBox]::Show($Window, $aviso, 'Senhas em texto legível', 'YesNo', 'Warning') -ne 'Yes') { return }
+    }
+    Invoke-GwtRunspace -ScriptBlock { param($c) Invoke-GwtPreFormatBackupWorker -Config $c } -Argument @{
+        Destino   = $destino
+        Drivers   = [bool]$sync.Controls['BackupDriversCheck'].IsChecked
+        Wifi      = $comWifi
+        Programas = [bool]$sync.Controls['BackupProgramsCheck'].IsChecked
+    }
+})
+
+$sync.Controls['BackupRestoreButton'].Add_Click({
+    if ($sync.Busy) { return }
+    if (-not (Test-GwtAdmin)) {
+        [System.Windows.MessageBox]::Show($Window, 'Restaurar drivers exige Administrador. Reabra o toolkit como Administrador.', 'Administrador necessário', 'OK', 'Warning') | Out-Null
+        return
+    }
+
+    # Procura um backup na pasta indicada; se não achar, deixa escolher
+    $base = ([string]$sync.Controls['BackupPathBox'].Text).Trim()
+    $pasta = $null
+    if ($base -and (Test-Path -LiteralPath $base)) {
+        if (Test-Path -LiteralPath (Join-Path $base 'backup-info.json')) { $pasta = $base }
+        else {
+            $cand = @(Get-ChildItem -LiteralPath $base -Directory -Filter 'GeniusBackup-*' -ErrorAction SilentlyContinue |
+                      Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'backup-info.json') })
+            if ($cand.Count -eq 1) { $pasta = $cand[0].FullName }
+            elseif ($cand.Count -gt 1) {
+                $nomes = ($cand | ForEach-Object { "  • $($_.Name)" }) -join "`n"
+                [System.Windows.MessageBox]::Show($Window, "Há mais de um backup nessa pasta:`n$nomes`n`nEscolha a pasta exata do backup na próxima janela.", 'Vários backups', 'OK', 'Information') | Out-Null
+            }
+        }
+    }
+    if (-not $pasta) {
+        Select-GwtFolderInto -BoxName 'BackupPathBox' -Titulo 'Selecione a pasta GeniusBackup-... do backup'
+        $pasta = ([string]$sync.Controls['BackupPathBox'].Text).Trim()
+        if (-not $pasta -or -not (Test-Path -LiteralPath $pasta)) { return }
+    }
+
+    $info = Get-GwtBackupManifest -Pasta $pasta
+    $desc = if ($info) {
+        "Backup de '$($info.Computador)'`nFeito em: $($info.DataHora)`nWindows de origem: $($info.Windows)`n`nDrivers: $($info.Drivers) | Redes Wi-Fi: $($info.RedesWifi)"
+    } else { "Pasta: $pasta`n`n(sem backup-info.json — pode não ser um backup do toolkit)" }
+
+    if ([System.Windows.MessageBox]::Show($Window, "$desc`n`nInstalar esses drivers e redes Wi-Fi nesta máquina?", 'Restaurar backup', 'YesNo', 'Question') -ne 'Yes') { return }
+    Invoke-GwtRunspace -ScriptBlock { param($c) Invoke-GwtPreFormatRestoreWorker -Config $c } -Argument @{ Pasta = $pasta }
+})
+
 # ---- Monitor de Internet ----
 $sync.Controls['MonitorInstallButton'].Add_Click({
     if ($sync.Busy) { return }
@@ -5821,6 +6567,9 @@ function Invoke-PendingUiAction {
             $sync.Controls['DiagnosticText'].Text = $sync.DiagReport
             $sync.Controls['MainTabs'].SelectedIndex = 7
         }
+        'HardwareReady' {
+            $sync.Controls['HardwareText'].Text = $sync.HardwareReport
+        }
         'IsoEditions' {
             $combo = $sync.Controls['IsoEditionCombo']
             $combo.Items.Clear()
@@ -5929,7 +6678,10 @@ $ActionButtons = @('AnalyzeButton', 'MigrateButton', 'CopyOnlyButton', 'NetworkR
                    'UpdateDefaultButton', 'UpdateSecurityButton', 'UpdateDisableButton',
                    'DnsApplyButton', 'PerfEnableButton', 'PerfDisableButton', 'DiagRunButton',
                    'MonitorInstallButton', 'MonitorOpenButton', 'MonitorUninstallButton',
-                   'IsoMountButton', 'IsoModifyButton', 'IsoExportButton', 'IsoCleanButton', 'IsoUsbWriteButton')
+                   'IsoMountButton', 'IsoModifyButton', 'IsoExportButton', 'IsoCleanButton', 'IsoUsbWriteButton',
+                   'HardwareScanButton', 'HardwareSaveButton', 'HardwareText',
+                   'BackupPathBox', 'BackupBrowseButton', 'BackupRunButton', 'BackupRestoreButton',
+                   'BackupDriversCheck', 'BackupWifiCheck', 'BackupProgramsCheck')
 
 $UiTimer = New-Object System.Windows.Threading.DispatcherTimer
 $UiTimer.Interval = [TimeSpan]::FromMilliseconds(200)

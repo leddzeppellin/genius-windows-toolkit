@@ -150,6 +150,30 @@ Na aba **Diagnóstico**, instala um monitor que mede a conexão sozinho de tempo
 
 Ótimo para diagnosticar reclamação de "internet lenta" em cliente: deixa medindo por alguns dias e depois mostra o gráfico. Os arquivos ficam em [`extras/InternetMonitor/`](extras/InternetMonitor).
 
+## 🖥️ Meu PC (saúde do hardware)
+
+Aba de **laudo de hardware**, só leitura — nada é alterado:
+
+- **Discos pelo S.M.A.R.T.**: estado de saúde, temperatura, **desgaste do SSD**, horas ligado, erros de leitura/escrita e **previsão de falha**. Avisa quando o desgaste passa de 80% ou quando o disco prevê falha, para você recomendar a troca com dado na mão.
+- **Bateria** (notebooks): capacidade de fábrica contra a atual, **% de saúde**, ciclos de carga e carga no momento. Os números vêm do relatório do próprio Windows (`powercfg /batteryreport`).
+- **Requisitos do Windows 11**: processador, memória, armazenamento, **firmware UEFI**, **Inicialização Segura** e **TPM 2.0**, com a orientação do que fazer em cada item reprovado.
+- **Dispositivos com problema**: lista o que está sem driver ou com erro, já com o **ID do hardware** para pesquisar o driver certo.
+- **Salvar laudo**: grava um `.txt` em `relatorios\` e abre, pronto para anexar à ordem de serviço.
+
+> Temperatura, desgaste e horas de uso exigem **Administrador** — sem elevação o Windows nega o acesso ao CIM, e o laudo diz isso em vez de deixar o campo vazio.
+
+## 💾 Backup antes de formatar
+
+Também na aba **Meu PC**. Salva num pendrive o que mais dá trabalho de refazer depois de formatar:
+
+- **Drivers** de terceiros da máquina (`Export-WindowsDriver`) — os do próprio Windows não precisam
+- **Redes Wi-Fi com as senhas** (`netsh wlan export profile key=clear`)
+- **Lista dos programas instalados**, com a saída do `winget list` para reinstalar em lote
+
+Cria a pasta `GeniusBackup-NOMEDOPC` com um `backup-info.json` (origem, data, Windows e contagens). Depois de formatar, abra o toolkit do mesmo pendrive e clique em **Restaurar backup**: ele acha a pasta, mostra de qual máquina o backup é e devolve os drivers (`pnputil /add-driver /subdirs /install`) e as redes.
+
+> ⚠️ O arquivo das redes Wi-Fi guarda as **senhas em texto legível** — o toolkit avisa e pede confirmação antes de exportar. Guarde o pendrive com cuidado e apague a pasta depois de usar.
+
 ## 🩺 Diagnóstico
 
 Relatório com Windows, hardware, volumes, pastas conhecidas do perfil, adaptadores e perfis de rede — salvo em `%LOCALAPPDATA%\GeniusWindowsToolkit\reports`.
