@@ -4035,6 +4035,45 @@ function Invoke-GwtRunspace {
             <Setter Property="Foreground" Value="#181305"/>
         </Style>
 
+        <!-- Menu de navegação lateral -->
+        <Style x:Key="NavButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Padding" Value="12,0,10,0"/>
+            <Setter Property="Height" Value="38"/>
+            <Setter Property="Margin" Value="0,1,0,1"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border Name="Bg" Background="{TemplateBinding Background}" CornerRadius="9"/>
+                            <!-- Marcador da tela ativa: o código acende pelo BorderBrush -->
+                            <Border Width="3" HorizontalAlignment="Left" Margin="0,7,0,7"
+                                    CornerRadius="2" Background="{TemplateBinding BorderBrush}"/>
+                            <ContentPresenter VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="{StaticResource SoftBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="NavGroup" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Margin" Value="12,14,0,4"/>
+        </Style>
+
         <Style x:Key="TitleButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
@@ -4056,6 +4095,20 @@ function Invoke-GwtRunspace {
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Padding" Value="0"/>
+            <!-- Template sem o TabPanel: quem navega é o menu lateral, então a
+                 barra de abas não é renderizada. (ItemContainerStyle não serviria:
+                 ele só vale para containers gerados por ItemsSource.) -->
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabControl">
+                        <Grid Background="{TemplateBinding Background}">
+                            <ContentPresenter x:Name="PART_SelectedContentHost"
+                                              ContentSource="SelectedContent"
+                                              Margin="{TemplateBinding Padding}"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style TargetType="TabItem">
@@ -4189,7 +4242,9 @@ function Invoke-GwtRunspace {
 
         <!-- Barra de título -->
         <Grid Grid.Row="0" Background="{StaticResource BgBrush}">
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="18,0,0,0">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
+                <Button Name="NavBackButton" Style="{StaticResource TitleButton}" Content="←" FontSize="16" Width="34" IsEnabled="False" Margin="0,0,6,0"
+                        ToolTip="Voltar à tela anterior (Alt+Seta esquerda ou o botão lateral do mouse)"/>
                 <Image Name="TitleLogo" Height="24" Margin="0,0,10,0" VerticalAlignment="Center" Stretch="Uniform" Visibility="Collapsed"/>
                 <TextBlock Name="TitleEmoji" Text="🧞" FontSize="20" VerticalAlignment="Center"/>
                 <TextBlock Text="Genius Windows Toolkit" FontSize="15" FontWeight="Bold" Margin="10,0,0,0" VerticalAlignment="Center"/>
@@ -4222,39 +4277,41 @@ function Invoke-GwtRunspace {
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
+                    <!-- Cabeçalho compacto: o espaço da barra lateral é do menu -->
                     <StackPanel Grid.Row="0">
-                        <Border Name="LogoPlate" Background="#F4F6F8" CornerRadius="12" Padding="14,12" Margin="0,0,0,14" Visibility="Collapsed">
-                            <Image Name="LogoImage" Stretch="Uniform" MaxHeight="120" HorizontalAlignment="Center"/>
+                        <Border Name="LogoPlate" Background="#F4F6F8" CornerRadius="10" Padding="10,8" Margin="0,0,0,10" Visibility="Collapsed">
+                            <Image Name="LogoImage" Stretch="Uniform" MaxHeight="64" HorizontalAlignment="Center"/>
                         </Border>
-                        <TextBlock Name="BrandKicker" Text="Ferramenta de bancada" Foreground="{StaticResource GoldBrush}" FontWeight="SemiBold" FontSize="12"/>
-                        <TextBlock Text="Pós-formatação sem dor" FontSize="21" FontWeight="Bold" Margin="0,2,0,6" TextWrapping="Wrap"/>
-                        <TextBlock Text="Migração de pastas, rede, programas, ajustes e diagnóstico — tudo com backup e log." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" LineHeight="19"/>
+                        <TextBlock Name="BrandKicker" Text="Ferramenta de bancada" Foreground="{StaticResource GoldBrush}" FontWeight="SemiBold" FontSize="11" Margin="12,0,0,0"/>
                     </StackPanel>
 
-                    <Border Grid.Row="1" Background="{StaticResource SoftBrush}" CornerRadius="10" Padding="12" Margin="0,16,0,0">
-                        <StackPanel>
-                            <TextBlock Text="Sessão" FontWeight="Bold" Margin="0,0,0,6"/>
-                            <TextBlock Name="AdminText" Text="Administrador: ..." Foreground="{StaticResource MutedBrush}" Margin="0,0,0,3"/>
-                            <TextBlock Name="ProfileText" Text="Perfil: ..." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"/>
-                        </StackPanel>
-                    </Border>
+                    <Border Grid.Row="1" Height="0" Visibility="Collapsed"/>
 
-                    <!-- ScrollViewer: se a janela for baixa, os atalhos rolam em vez de sumirem -->
+                    <!-- Menu de navegação: cada botão abre uma tela (Tag = identificador da aba) -->
                     <ScrollViewer Grid.Row="2" Margin="0,14,0,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                        <StackPanel>
-                            <TextBlock Text="Atalhos" FontWeight="Bold" Margin="0,0,0,8"/>
-                            <Button Name="ElevateButton" Content="🛡️  Abrir como Administrador" HorizontalContentAlignment="Left" Margin="0,0,0,6" Padding="12,7" MinHeight="32"/>
-                            <Button Name="ExportPresetButton" Style="{StaticResource GhostButton}" Content="📤  Exportar preset" Margin="0,0,0,6" Padding="12,7" MinHeight="32"/>
-                            <Button Name="ImportPresetButton" Style="{StaticResource GhostButton}" Content="📥  Importar preset" Margin="0,0,0,6" Padding="12,7" MinHeight="32"/>
-                            <Button Name="OpenBackupsButton" Style="{StaticResource GhostButton}" Content="🗂️  Abrir backups" Margin="0,0,0,6" Padding="12,7" MinHeight="32"/>
-                            <Button Name="OpenLogsButton" Style="{StaticResource GhostButton}" Content="📜  Abrir logs" Margin="0,0,0,6" Padding="12,7" MinHeight="32"/>
-                            <Button Name="SessionReportButton" Style="{StaticResource GoldButton}" Content="📋  Relatório da sessão" Margin="0,0,0,6" Padding="12,7" MinHeight="32"
-                                    ToolTip="Gera um relatório HTML com tudo o que foi feito nesta máquina — bom para anexar à ordem de serviço."/>
-                            <Button Name="RestoreRegButton" Style="{StaticResource GhostButton}" Content="♻️  Restaurar backup .reg" Margin="0,0,0,6" Padding="12,7" MinHeight="32"/>
+                        <StackPanel Name="NavMenu">
+                            <Button Tag="inicio" Style="{StaticResource NavButton}" Content="🏠   Início"/>
+
+                            <TextBlock Style="{StaticResource NavGroup}" Text="PÓS-FORMATAÇÃO"/>
+                            <Button Tag="pastas" Style="{StaticResource NavButton}" Content="📁   Pastas do usuário"/>
+                            <Button Tag="programas" Style="{StaticResource NavButton}" Content="📦   Programas"/>
+
+                            <TextBlock Style="{StaticResource NavGroup}" Text="MEU PC"/>
+                            <Button Tag="meupc" Style="{StaticResource NavButton}" Content="🖥️   Saúde do hardware"/>
+                            <Button Tag="rede" Style="{StaticResource NavButton}" Content="🌐   Rede e compartilhamento"/>
+                            <Button Tag="diagnostico" Style="{StaticResource NavButton}" Content="🩺   Diagnóstico"/>
+
+                            <TextBlock Style="{StaticResource NavGroup}" Text="OTIMIZAR"/>
+                            <Button Tag="ajustes" Style="{StaticResource NavButton}" Content="⚙️   Ajustes"/>
+                            <Button Tag="privacidade" Style="{StaticResource NavButton}" Content="🧹   Privacidade e limpeza"/>
+
+                            <TextBlock Style="{StaticResource NavGroup}" Text="SEGURANÇA E EXTRAS"/>
+                            <Button Tag="recursos" Style="{StaticResource NavButton}" Content="🧩   Recursos e correções"/>
+                            <Button Tag="iso" Style="{StaticResource NavButton}" Content="🪟   Criar ISO do Windows"/>
                         </StackPanel>
                     </ScrollViewer>
 
-                    <StackPanel Grid.Row="3">
+                    <StackPanel Grid.Row="3" Margin="0,10,0,0">
                         <Border Background="{StaticResource SoftBrush}" CornerRadius="10" Padding="10" Margin="0,0,0,8">
                             <StackPanel>
                                 <CheckBox Name="RestorePointCheck" IsChecked="True" FontSize="12"
@@ -4263,7 +4320,8 @@ function Invoke-GwtRunspace {
                                 <TextBlock Text="Rede de segurança antes de alterar o sistema." Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"/>
                             </StackPanel>
                         </Border>
-                        <TextBlock Text="Ações sensíveis sempre pedem confirmação e criam backup antes de alterar o registro." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" LineHeight="18" FontSize="12"/>
+                        <TextBlock Name="AdminText" Text="Administrador: ..." Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="2,0,0,2"/>
+                        <TextBlock Name="ProfileText" Text="Perfil: ..." Foreground="{StaticResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="2,0,0,0"/>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -4277,7 +4335,56 @@ function Invoke-GwtRunspace {
                 </Grid.RowDefinitions>
 
                 <TabControl Name="MainTabs" Grid.Row="0">
-                    <TabItem Header="📁  Pastas">
+                    <TabItem Tag="inicio" Header="🏠  Início">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,4,0,0">
+                            <StackPanel>
+                                <Border Style="{StaticResource Card}" Padding="18" Margin="0,0,0,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Name="HomeHelloText" Text="Bem-vindo" FontSize="22" FontWeight="Bold"/>
+                                            <TextBlock Text="Escolha uma tela no menu à esquerda. Tudo o que altera o sistema pede confirmação, cria backup e entra no relatório da sessão." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,16,0" LineHeight="19"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Name="SessionReportButton" Style="{StaticResource GoldButton}" Content="📋  Relatório da sessão" VerticalAlignment="Top"
+                                                ToolTip="Gera um relatório HTML com tudo o que foi feito nesta máquina — bom para anexar à ordem de serviço."/>
+                                    </Grid>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}" Padding="18" Margin="0,0,0,12">
+                                    <StackPanel>
+                                        <TextBlock Text="⚡  Começar por aqui" FontSize="16" FontWeight="Bold" Margin="0,0,0,4"/>
+                                        <TextBlock Text="Os caminhos mais usados numa máquina recém-formatada." Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,0,0,12"/>
+                                        <WrapPanel>
+                                            <Button Name="HomeGoFoldersButton" Style="{StaticResource GhostButton}" Content="📁  Mover pastas do usuário" Margin="0,0,8,8" Padding="14,9"/>
+                                            <Button Name="HomeGoProgramsButton" Style="{StaticResource GhostButton}" Content="📦  Instalar programas" Margin="0,0,8,8" Padding="14,9"/>
+                                            <Button Name="HomeGoNetworkButton" Style="{StaticResource GhostButton}" Content="🌐  Reparar rede e compartilhamento" Margin="0,0,8,8" Padding="14,9"/>
+                                            <Button Name="HomeGoHardwareButton" Style="{StaticResource GhostButton}" Content="🖥️  Conferir a saúde do PC" Margin="0,0,8,8" Padding="14,9"/>
+                                            <Button Name="HomeGoBackupButton" Style="{StaticResource GhostButton}" Content="💾  Backup antes de formatar" Margin="0,0,0,8" Padding="14,9"/>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource Card}" Padding="18">
+                                    <StackPanel>
+                                        <TextBlock Text="🧰  Ferramentas da sessão" FontSize="16" FontWeight="Bold" Margin="0,0,0,4"/>
+                                        <TextBlock Text="Presets levam a sua configuração para a próxima máquina; os backups e logs ficam guardados por sessão." Foreground="{StaticResource MutedBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,12"/>
+                                        <WrapPanel>
+                                            <Button Name="ElevateButton" Content="🛡️  Abrir como Administrador" Margin="0,0,8,8" Padding="14,9"/>
+                                            <Button Name="ExportPresetButton" Style="{StaticResource GhostButton}" Content="📤  Exportar preset" Margin="0,0,8,8" Padding="14,9"/>
+                                            <Button Name="ImportPresetButton" Style="{StaticResource GhostButton}" Content="📥  Importar preset" Margin="0,0,8,8" Padding="14,9"/>
+                                            <Button Name="OpenBackupsButton" Style="{StaticResource GhostButton}" Content="🗂️  Abrir backups" Margin="0,0,8,8" Padding="14,9"/>
+                                            <Button Name="OpenLogsButton" Style="{StaticResource GhostButton}" Content="📜  Abrir logs" Margin="0,0,8,8" Padding="14,9"/>
+                                            <Button Name="RestoreRegButton" Style="{StaticResource GhostButton}" Content="♻️  Restaurar backup .reg" Margin="0,0,0,8" Padding="14,9"/>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+                    <TabItem Tag="pastas" Header="📁  Pastas">
                         <Grid Margin="0,4,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="300"/>
@@ -4349,7 +4456,7 @@ function Invoke-GwtRunspace {
                         </Grid>
                     </TabItem>
 
-                    <TabItem Header="🌐  Rede">
+                    <TabItem Tag="rede" Header="🌐  Rede">
                         <Grid Margin="0,4,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="430"/>
@@ -4390,7 +4497,7 @@ function Invoke-GwtRunspace {
                         </Grid>
                     </TabItem>
 
-                    <TabItem Header="📦  Programas">
+                    <TabItem Tag="programas" Header="📦  Programas">
                         <Grid Margin="0,4,0,0">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
@@ -4449,7 +4556,7 @@ function Invoke-GwtRunspace {
                         </Grid>
                     </TabItem>
 
-                    <TabItem Header="⚙️  Ajustes">
+                    <TabItem Tag="ajustes" Header="⚙️  Ajustes">
                         <Grid Margin="0,4,0,0">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
@@ -4483,7 +4590,7 @@ function Invoke-GwtRunspace {
                         </Grid>
                     </TabItem>
 
-                    <TabItem Header="🧹  Privacidade">
+                    <TabItem Tag="privacidade" Header="🧹  Privacidade">
                         <Grid Margin="0,4,0,0">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="*"/>
@@ -4543,7 +4650,7 @@ function Invoke-GwtRunspace {
                         </Grid>
                     </TabItem>
 
-                    <TabItem Header="🧩  Recursos">
+                    <TabItem Tag="recursos" Header="🧩  Recursos">
                         <Grid Margin="0,4,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -4647,7 +4754,7 @@ function Invoke-GwtRunspace {
                         </Grid>
                     </TabItem>
 
-                    <TabItem Header="🪟  Criar ISO">
+                    <TabItem Tag="iso" Header="🪟  Criar ISO">
                         <Grid Margin="0,4,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -4802,7 +4909,7 @@ function Invoke-GwtRunspace {
                         </Grid>
                     </TabItem>
 
-                    <TabItem Header="🩺  Diagnóstico">
+                    <TabItem Tag="diagnostico" Header="🩺  Diagnóstico">
                         <Grid Margin="0,4,0,0">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
@@ -4847,7 +4954,7 @@ function Invoke-GwtRunspace {
                         </Grid>
                     </TabItem>
 
-                    <TabItem Header="🖥️  Meu PC">
+                    <TabItem Tag="meupc" Header="🖥️  Meu PC">
                         <Grid Margin="0,4,0,0">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
@@ -4998,6 +5105,64 @@ function Show-GwtLogo {
     catch { }
 }
 Show-GwtLogo
+
+# ---------------------------------------------------------------------------
+# Navegação por telas: o menu lateral troca a aba ativa do TabControl (cuja
+# barra de abas está oculta) e guarda o histórico para o botão Voltar.
+# ---------------------------------------------------------------------------
+$script:NavHistory = New-Object System.Collections.Generic.List[string]
+$script:NavCurrent = $null
+
+function Get-GwtNavButtons {
+    $menu = $sync.Controls['NavMenu']
+    if (-not $menu) { return @() }
+    return @($menu.Children | Where-Object { $_ -is [System.Windows.Controls.Button] })
+}
+
+function Update-GwtNavSelection {
+    $ativo = $script:NavCurrent
+    foreach ($b in (Get-GwtNavButtons)) {
+        if ([string]$b.Tag -eq $ativo) {
+            $b.BorderBrush = $Window.Resources['GoldBrush']
+            $b.Background = $Window.Resources['SoftBrush']
+            $b.FontWeight = 'Bold'
+        }
+        else {
+            $b.BorderBrush = [System.Windows.Media.Brushes]::Transparent
+            $b.Background = [System.Windows.Media.Brushes]::Transparent
+            $b.FontWeight = 'Normal'
+        }
+    }
+    $sync.Controls['NavBackButton'].IsEnabled = ($script:NavHistory.Count -gt 0)
+}
+
+function Set-GwtScreen {
+    param([string]$Chave, [switch]$SemHistorico)
+
+    $tabs = $sync.Controls['MainTabs']
+    $alvo = -1
+    for ($i = 0; $i -lt $tabs.Items.Count; $i++) {
+        if ([string]$tabs.Items[$i].Tag -eq $Chave) { $alvo = $i; break }
+    }
+    if ($alvo -lt 0) { return }
+    if ($script:NavCurrent -eq $Chave) { return }
+
+    if (-not $SemHistorico -and $script:NavCurrent) {
+        $script:NavHistory.Add($script:NavCurrent)
+        # Guarda só as últimas 30 telas visitadas
+        while ($script:NavHistory.Count -gt 30) { $script:NavHistory.RemoveAt(0) }
+    }
+    $script:NavCurrent = $Chave
+    $tabs.SelectedIndex = $alvo
+    Update-GwtNavSelection
+}
+
+function Invoke-GwtNavBack {
+    if ($script:NavHistory.Count -eq 0) { return }
+    $ultima = $script:NavHistory[$script:NavHistory.Count - 1]
+    $script:NavHistory.RemoveAt($script:NavHistory.Count - 1)
+    Set-GwtScreen -Chave $ultima -SemHistorico
+}
 
 function Invalidate-Plan {
     $sync.PlanValid = $false
@@ -5986,6 +6151,37 @@ $sync.Controls['DiagRunButton'].Add_Click({
     Invoke-GwtRunspace -ScriptBlock { Invoke-GwtDiagnosticWorker }
 })
 
+# ---- Navegação pelo menu lateral ----
+foreach ($navBtn in (Get-GwtNavButtons)) {
+    $navBtn.Add_Click({ Set-GwtScreen -Chave ([string]$this.Tag) })
+}
+$sync.Controls['NavBackButton'].Add_Click({ Invoke-GwtNavBack })
+
+# Alt + seta esquerda volta; o botão lateral do mouse também (como num navegador)
+$Window.Add_PreviewKeyDown({
+    if ($_.Key -eq 'Left' -and ([System.Windows.Input.Keyboard]::Modifiers -band
+        [System.Windows.Input.ModifierKeys]::Alt)) {
+        Invoke-GwtNavBack
+        $_.Handled = $true
+    }
+})
+$Window.Add_MouseDown({
+    if ($_.ChangedButton -eq [System.Windows.Input.MouseButton]::XButton1) {
+        Invoke-GwtNavBack
+        $_.Handled = $true
+    }
+})
+
+# Atalhos da tela Início
+$sync.Controls['HomeGoFoldersButton'].Add_Click({ Set-GwtScreen -Chave 'pastas' })
+$sync.Controls['HomeGoProgramsButton'].Add_Click({ Set-GwtScreen -Chave 'programas' })
+$sync.Controls['HomeGoNetworkButton'].Add_Click({ Set-GwtScreen -Chave 'rede' })
+$sync.Controls['HomeGoHardwareButton'].Add_Click({ Set-GwtScreen -Chave 'meupc' })
+$sync.Controls['HomeGoBackupButton'].Add_Click({
+    Set-GwtScreen -Chave 'meupc'
+    $sync.Controls['BackupPathBox'].Focus() | Out-Null
+})
+
 # ---- Meu PC: saúde do hardware e backup pré-formatação ----
 $sync.Controls['HardwareScanButton'].Add_Click({
     if ($sync.Busy) { return }
@@ -6226,6 +6422,10 @@ Set-GwtIsoProfile -Perfil 'Recomendado'
 # Ferramentas externas cadastradas
 Import-GwtTools
 Update-GwtExtToolsList
+
+# Abre na tela Início (o histórico começa vazio: não há para onde voltar)
+Set-GwtScreen -Chave 'inicio' -SemHistorico
+$sync.Controls['HomeHelloText'].Text = "Olá, $env:USERNAME"
 
 $sync.Controls['IsoUsbRefreshButton'].Add_Click({
     $combo = $sync.Controls['IsoUsbCombo']
@@ -6565,7 +6765,7 @@ function Invoke-PendingUiAction {
         }
         'DiagReady' {
             $sync.Controls['DiagnosticText'].Text = $sync.DiagReport
-            $sync.Controls['MainTabs'].SelectedIndex = 7
+            Set-GwtScreen -Chave 'diagnostico'
         }
         'HardwareReady' {
             $sync.Controls['HardwareText'].Text = $sync.HardwareReport
@@ -6679,6 +6879,8 @@ $ActionButtons = @('AnalyzeButton', 'MigrateButton', 'CopyOnlyButton', 'NetworkR
                    'DnsApplyButton', 'PerfEnableButton', 'PerfDisableButton', 'DiagRunButton',
                    'MonitorInstallButton', 'MonitorOpenButton', 'MonitorUninstallButton',
                    'IsoMountButton', 'IsoModifyButton', 'IsoExportButton', 'IsoCleanButton', 'IsoUsbWriteButton',
+                   'NavMenu', 'NavBackButton', 'HomeHelloText', 'HomeGoFoldersButton',
+                   'HomeGoProgramsButton', 'HomeGoNetworkButton', 'HomeGoHardwareButton', 'HomeGoBackupButton',
                    'HardwareScanButton', 'HardwareSaveButton', 'HardwareText',
                    'BackupPathBox', 'BackupBrowseButton', 'BackupRunButton', 'BackupRestoreButton',
                    'BackupDriversCheck', 'BackupWifiCheck', 'BackupProgramsCheck')

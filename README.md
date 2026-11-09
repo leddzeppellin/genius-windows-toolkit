@@ -13,6 +13,14 @@
 
 Utilitário PowerShell de bancada para **pós-formatação do Windows**, com interface gráfica moderna: todas as operações pesadas rodam em *runspaces* em segundo plano — a janela nunca congela — com log em tempo real, barra de progresso real e backup antes de qualquer alteração.
 
+### 🧭 Navegação
+
+A interface é organizada em **telas acessadas pelo menu lateral**, agrupadas por assunto (Pós-formatação, Meu PC, Otimizar, Segurança e extras) — sem barra de abas.
+
+- A tela **Início** reúne os caminhos mais usados numa máquina recém-formatada e as ferramentas da sessão (presets, backups, logs, relatório)
+- O **botão ← no alto** volta à tela anterior, assim como **Alt + seta esquerda** e o **botão lateral do mouse**
+- A tela atual fica marcada no menu com um traço dourado
+
 ## Execução rápida (PowerShell)
 
 Abra o PowerShell e rode:
